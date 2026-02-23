@@ -1,0 +1,635 @@
+"""
+FlyRely Flight Delay Prediction API
+====================================
+FastAPI backend for predicting flight delay risk.
+
+Features:
+- Real-time weather integration (Tomorrow.io or OpenWeatherMap)
+- ML-based delay probability prediction
+- Risk level classification (Low/Medium/High)
+
+Usage:
+    pip install fastapi uvicorn httpx python-dotenv joblib pandas numpy scikit-learn
+    uvicorn main:app --reload
+
+API Endpoints:
+    GET  /                  - API info
+    GET  /health            - Health check
+    POST /predict           - Predict delay risk for a flight
+    GET  /airports          - List supported airports
+"""
+
+import os
+import json
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import joblib
+import httpx
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+# Weather API configuration (set via environment variables)
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")  # Tomorrow.io or OpenWeatherMap
+WEATHER_API_PROVIDER = os.getenv("WEATHER_API_PROVIDER", "tomorrow")  # "tomorrow" or "openweathermap"
+
+# Model paths
+MODEL_DIR = Path(__file__).parent / "models"
+MODEL_PATH = MODEL_DIR / "flight_delay_model.joblib"
+FEATURES_PATH = MODEL_DIR / "feature_names.joblib"
+METADATA_PATH = MODEL_DIR / "model_metadata.json"
+
+# Airport coordinates for weather lookups
+AIRPORT_COORDS = {
+    "ATL": (33.6407, -84.4277), "ORD": (41.9742, -87.9073), "DFW": (32.8998, -97.0403),
+    "DEN": (39.8561, -104.6737), "LAX": (33.9425, -118.4081), "JFK": (40.6413, -73.7781),
+    "SFO": (37.6213, -122.3790), "SEA": (47.4502, -122.3088), "MIA": (25.7959, -80.2870),
+    "PHX": (33.4373, -112.0078), "LAS": (36.0840, -115.1537), "MCO": (28.4312, -81.3081),
+    "CLT": (35.2140, -80.9431), "EWR": (40.6895, -74.1745), "BOS": (42.3656, -71.0096),
+    "MSP": (44.8848, -93.2223), "DTW": (42.2162, -83.3554), "PHL": (39.8744, -75.2424),
+    "LGA": (40.7769, -73.8740), "DCA": (38.8512, -77.0402), "IAH": (29.9902, -95.3368),
+    "SLC": (40.7899, -111.9791), "SAN": (32.7338, -117.1933), "TPA": (27.9756, -82.5333),
+    "PDX": (45.5898, -122.5951), "BWI": (39.1774, -76.6684), "FLL": (26.0742, -80.1506),
+    "MDW": (41.7868, -87.7522), "BNA": (36.1263, -86.6774), "AUS": (30.1975, -97.6664),
+}
+
+# Historical delay rates by airport (from training data)
+AIRPORT_DELAY_RATES = {
+    "ATL": 0.21, "ORD": 0.25, "DFW": 0.20, "DEN": 0.22, "LAX": 0.19, "JFK": 0.26,
+    "SFO": 0.24, "SEA": 0.20, "MIA": 0.21, "PHX": 0.18, "LAS": 0.19, "MCO": 0.20,
+    "CLT": 0.21, "EWR": 0.27, "BOS": 0.23, "MSP": 0.21, "DTW": 0.20, "PHL": 0.24,
+    "LGA": 0.26, "DCA": 0.22, "IAH": 0.21, "SLC": 0.18, "SAN": 0.17, "TPA": 0.19,
+    "PDX": 0.19, "BWI": 0.20, "FLL": 0.21, "MDW": 0.22, "BNA": 0.20, "AUS": 0.19,
+}
+
+# Historical delay rates by airline
+AIRLINE_DELAY_RATES = {
+    "AA": 0.21, "DL": 0.18, "UA": 0.22, "WN": 0.23, "AS": 0.17, "B6": 0.24,
+    "NK": 0.28, "F9": 0.27, "G4": 0.26, "HA": 0.16, "SY": 0.25,
+}
+
+# Hub airports
+HUB_AIRPORTS = {"ATL", "ORD", "DFW", "DEN", "LAX", "JFK", "SFO", "CLT", "LAS", "PHX",
+                "MIA", "SEA", "EWR", "MCO", "BOS", "IAH", "MSP", "DTW", "PHL", "LGA"}
+
+# =============================================================================
+# FastAPI App
+# =============================================================================
+
+app = FastAPI(
+    title="FlyRely API",
+    description="Flight delay prediction API with real-time weather integration",
+    version="1.0.0",
+)
+
+# CORS middleware for frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# =============================================================================
+# Pydantic Models
+# =============================================================================
+
+class FlightRequest(BaseModel):
+    """Request model for flight delay prediction."""
+    origin: str = Field(..., description="Origin airport code (e.g., 'JFK')", min_length=3, max_length=3)
+    destination: str = Field(..., description="Destination airport code (e.g., 'LAX')", min_length=3, max_length=3)
+    departure_time: datetime = Field(..., description="Scheduled departure time (ISO format)")
+    airline: Optional[str] = Field(None, description="Airline code (e.g., 'AA', 'DL', 'UA')")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "origin": "JFK",
+                "destination": "LAX",
+                "departure_time": "2025-03-15T14:30:00",
+                "airline": "AA"
+            }
+        }
+
+
+class WeatherData(BaseModel):
+    """Weather conditions at an airport."""
+    temperature_f: float
+    wind_speed_mph: float
+    visibility_miles: float
+    conditions: str
+
+
+class PredictionResponse(BaseModel):
+    """Response model for flight delay prediction."""
+    risk_level: str = Field(..., description="Risk level: 'low', 'medium', or 'high'")
+    delay_probability: float = Field(..., description="Probability of delay (0-1)")
+    confidence: float = Field(..., description="Model confidence (0-1)")
+
+    # Flight details
+    origin: str
+    destination: str
+    departure_time: str
+    airline: Optional[str]
+
+    # Weather data (if available)
+    origin_weather: Optional[WeatherData] = None
+    destination_weather: Optional[WeatherData] = None
+
+    # Factors contributing to risk
+    risk_factors: list[str] = Field(default_factory=list)
+
+    # Recommendations
+    recommendations: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
+# Weather Service
+# =============================================================================
+
+class WeatherService:
+    """Service for fetching real-time weather data."""
+
+    def __init__(self, api_key: str, provider: str = "tomorrow"):
+        self.api_key = api_key
+        self.provider = provider
+        self.client = httpx.AsyncClient(timeout=10.0, proxy=None)
+        self._cache = {}  # Simple in-memory cache
+        self._cache_ttl = 1800  # 30 minutes
+
+    async def get_weather(self, airport_code: str) -> Optional[dict]:
+        """Get current weather for an airport."""
+        if not self.api_key:
+            logger.warning("No weather API key configured")
+            return None
+
+        coords = AIRPORT_COORDS.get(airport_code.upper())
+        if not coords:
+            logger.warning(f"Unknown airport: {airport_code}")
+            return None
+
+        # Check cache
+        cache_key = f"{airport_code}_{datetime.now().strftime('%Y%m%d%H')}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        try:
+            if self.provider == "tomorrow":
+                weather = await self._fetch_tomorrow_io(coords)
+            else:
+                weather = await self._fetch_openweathermap(coords)
+
+            if weather:
+                self._cache[cache_key] = weather
+            return weather
+
+        except Exception as e:
+            logger.error(f"Weather API error: {e}")
+            return None
+
+    async def _fetch_tomorrow_io(self, coords: tuple) -> Optional[dict]:
+        """Fetch weather from Tomorrow.io API."""
+        lat, lon = coords
+        url = "https://api.tomorrow.io/v4/weather/realtime"
+        params = {
+            "location": f"{lat},{lon}",
+            "apikey": self.api_key,
+            "units": "imperial"
+        }
+
+        response = await self.client.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        values = data.get("data", {}).get("values", {})
+        return {
+            "temperature_f": values.get("temperature", 70),
+            "wind_speed_mph": values.get("windSpeed", 10),
+            "visibility_miles": values.get("visibility", 10),
+            "conditions": self._get_conditions_tomorrow(values)
+        }
+
+    async def _fetch_openweathermap(self, coords: tuple) -> Optional[dict]:
+        """Fetch weather from OpenWeatherMap API."""
+        lat, lon = coords
+        url = "https://api.openweathermap.org/data/2.5/weather"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": self.api_key,
+            "units": "imperial"
+        }
+
+        response = await self.client.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        return {
+            "temperature_f": data.get("main", {}).get("temp", 70),
+            "wind_speed_mph": data.get("wind", {}).get("speed", 10),
+            "visibility_miles": data.get("visibility", 10000) / 1609.34,  # m to miles
+            "conditions": data.get("weather", [{}])[0].get("description", "clear")
+        }
+
+    def _get_conditions_tomorrow(self, values: dict) -> str:
+        """Convert Tomorrow.io weather code to description."""
+        code = values.get("weatherCode", 1000)
+        conditions = {
+            1000: "clear", 1100: "mostly clear", 1101: "partly cloudy",
+            1102: "mostly cloudy", 1001: "cloudy", 2000: "fog", 2100: "light fog",
+            4000: "drizzle", 4001: "rain", 4200: "light rain", 4201: "heavy rain",
+            5000: "snow", 5001: "flurries", 5100: "light snow", 5101: "heavy snow",
+            6000: "freezing drizzle", 6001: "freezing rain", 7000: "ice pellets",
+            7101: "heavy ice pellets", 7102: "light ice pellets", 8000: "thunderstorm"
+        }
+        return conditions.get(code, "unknown")
+
+
+# Initialize weather service
+weather_service = WeatherService(WEATHER_API_KEY, WEATHER_API_PROVIDER)
+
+# =============================================================================
+# Model Service
+# =============================================================================
+
+class ModelService:
+    """Service for loading and running the ML model."""
+
+    def __init__(self):
+        self.model = None
+        self.feature_names = None
+        self.metadata = None
+        self._load_model()
+
+    def _load_model(self):
+        """Load the trained model and metadata."""
+        try:
+            if MODEL_PATH.exists():
+                self.model = joblib.load(MODEL_PATH)
+                logger.info(f"Model loaded from {MODEL_PATH}")
+            else:
+                logger.warning(f"Model not found at {MODEL_PATH}")
+
+            if FEATURES_PATH.exists():
+                self.feature_names = joblib.load(FEATURES_PATH)
+                logger.info(f"Feature names loaded: {len(self.feature_names)} features")
+
+            if METADATA_PATH.exists():
+                with open(METADATA_PATH) as f:
+                    self.metadata = json.load(f)
+                logger.info(f"Model metadata loaded")
+
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+
+    def predict(self, features: dict) -> tuple[float, str]:
+        """
+        Make a prediction.
+
+        Returns:
+            tuple: (probability, risk_level)
+        """
+        if self.model is None:
+            # Fallback to simple heuristic if model not loaded
+            return self._heuristic_predict(features)
+
+        # Build feature vector
+        feature_vector = self._build_feature_vector(features)
+
+        # Get probability
+        proba = self.model.predict_proba([feature_vector])[0, 1]
+
+        # Convert to risk level
+        risk_level = self._probability_to_risk(proba)
+
+        return proba, risk_level
+
+    def _build_feature_vector(self, features: dict) -> list:
+        """Build feature vector in the correct order."""
+        if self.feature_names is None:
+            # Default feature order
+            self.feature_names = [
+                'dep_hour', 'day_of_week', 'month', 'is_weekend',
+                'is_morning', 'is_afternoon', 'is_evening', 'is_night',
+                'season', 'is_holiday_period', 'days_to_holiday',
+                'origin_delay_rate', 'dest_delay_rate', 'route_delay_rate',
+                'airline_delay_rate', 'origin_is_hub', 'dest_is_hub', 'distance',
+                'origin_temp_f', 'origin_wind_mph', 'origin_visibility',
+                'low_visibility', 'high_wind', 'freezing_temp', 'severe_weather'
+            ]
+
+        vector = []
+        for name in self.feature_names:
+            vector.append(features.get(name, 0))
+
+        return vector
+
+    def _probability_to_risk(self, prob: float) -> str:
+        """Convert probability to risk level."""
+        if prob < 0.25:
+            return "low"
+        elif prob < 0.50:
+            return "medium"
+        else:
+            return "high"
+
+    def _heuristic_predict(self, features: dict) -> tuple[float, str]:
+        """Simple heuristic prediction as fallback."""
+        prob = 0.15  # Base rate
+
+        # Adjust for time of day
+        hour = features.get('dep_hour', 12)
+        if 17 <= hour <= 21:
+            prob += 0.10  # Evening peak
+        elif 6 <= hour <= 9:
+            prob += 0.05  # Morning rush
+
+        # Adjust for weather
+        if features.get('low_visibility', 0):
+            prob += 0.15
+        if features.get('high_wind', 0):
+            prob += 0.10
+        if features.get('freezing_temp', 0):
+            prob += 0.12
+
+        # Adjust for airport
+        prob += features.get('origin_delay_rate', 0.20) - 0.20
+
+        prob = min(max(prob, 0), 1)
+        risk_level = self._probability_to_risk(prob)
+
+        return prob, risk_level
+
+
+# Initialize model service
+model_service = ModelService()
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def get_season(month: int) -> int:
+    """Get season from month (0=winter, 1=spring, 2=summer, 3=fall)."""
+    if month in [12, 1, 2]:
+        return 0
+    elif month in [3, 4, 5]:
+        return 1
+    elif month in [6, 7, 8]:
+        return 2
+    else:
+        return 3
+
+
+def get_days_to_holiday(date: datetime) -> int:
+    """Calculate days to nearest major US holiday."""
+    holidays_2025 = [
+        datetime(2025, 1, 1), datetime(2025, 1, 20), datetime(2025, 2, 17),
+        datetime(2025, 5, 26), datetime(2025, 7, 4), datetime(2025, 9, 1),
+        datetime(2025, 11, 27), datetime(2025, 12, 25),
+    ]
+    holidays_2026 = [
+        datetime(2026, 1, 1), datetime(2026, 1, 19), datetime(2026, 2, 16),
+        datetime(2026, 5, 25), datetime(2026, 7, 4), datetime(2026, 9, 7),
+        datetime(2026, 11, 26), datetime(2026, 12, 25),
+    ]
+    holidays = holidays_2025 + holidays_2026
+
+    min_days = min(abs((date - h).days) for h in holidays)
+    return min_days
+
+
+def estimate_distance(origin: str, dest: str) -> float:
+    """Estimate flight distance in miles."""
+    # Simple approximation based on coordinates
+    coords1 = AIRPORT_COORDS.get(origin.upper(), (39.8, -98.5))  # Default: center US
+    coords2 = AIRPORT_COORDS.get(dest.upper(), (39.8, -98.5))
+
+    # Haversine formula (simplified)
+    lat1, lon1 = coords1
+    lat2, lon2 = coords2
+
+    dlat = abs(lat2 - lat1)
+    dlon = abs(lon2 - lon1)
+
+    # Rough approximation: 1 degree ≈ 69 miles
+    distance = ((dlat * 69) ** 2 + (dlon * 69 * 0.7) ** 2) ** 0.5
+
+    return max(distance, 100)  # Minimum 100 miles
+
+
+def get_risk_factors(features: dict, weather_origin: dict, weather_dest: dict) -> list[str]:
+    """Identify risk factors for the flight."""
+    factors = []
+
+    # Time-based factors
+    hour = features.get('dep_hour', 12)
+    if 17 <= hour <= 21:
+        factors.append("Evening departure (peak congestion time)")
+
+    if features.get('is_holiday_period'):
+        factors.append("Holiday travel period (high traffic)")
+
+    # Weather factors
+    if weather_origin:
+        if weather_origin.get('visibility_miles', 10) < 3:
+            factors.append(f"Low visibility at origin ({weather_origin['visibility_miles']:.1f} mi)")
+        if weather_origin.get('wind_speed_mph', 0) > 20:
+            factors.append(f"High winds at origin ({weather_origin['wind_speed_mph']:.0f} mph)")
+        if weather_origin.get('temperature_f', 70) < 32:
+            factors.append(f"Freezing conditions at origin ({weather_origin['temperature_f']:.0f}°F)")
+
+    if weather_dest:
+        if weather_dest.get('visibility_miles', 10) < 3:
+            factors.append(f"Low visibility at destination ({weather_dest['visibility_miles']:.1f} mi)")
+        if weather_dest.get('wind_speed_mph', 0) > 20:
+            factors.append(f"High winds at destination ({weather_dest['wind_speed_mph']:.0f} mph)")
+
+    # Airport factors
+    origin_rate = features.get('origin_delay_rate', 0.20)
+    if origin_rate > 0.24:
+        factors.append(f"Origin airport has high historical delay rate ({origin_rate*100:.0f}%)")
+
+    return factors
+
+
+def get_recommendations(risk_level: str, factors: list[str]) -> list[str]:
+    """Generate recommendations based on risk level."""
+    recommendations = []
+
+    if risk_level == "high":
+        recommendations.append("Consider booking an earlier flight as backup")
+        recommendations.append("Allow extra time for connections (2+ hours)")
+        recommendations.append("Sign up for flight status notifications")
+    elif risk_level == "medium":
+        recommendations.append("Monitor flight status closer to departure")
+        recommendations.append("Have a backup plan for tight connections")
+    else:
+        recommendations.append("Flight conditions look favorable")
+
+    # Weather-specific recommendations
+    if any("visibility" in f.lower() for f in factors):
+        recommendations.append("Check for fog-related delays in morning hours")
+
+    if any("wind" in f.lower() for f in factors):
+        recommendations.append("Wind may cause turbulence - secure belongings")
+
+    return recommendations
+
+
+# =============================================================================
+# API Endpoints
+# =============================================================================
+
+@app.get("/")
+async def root():
+    """API information."""
+    return {
+        "name": "FlyRely API",
+        "version": "1.0.0",
+        "description": "Flight delay prediction with real-time weather",
+        "endpoints": {
+            "POST /predict": "Predict delay risk for a flight",
+            "GET /airports": "List supported airports",
+            "GET /health": "Health check"
+        }
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "model_loaded": model_service.model is not None,
+        "weather_api_configured": bool(WEATHER_API_KEY),
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/airports")
+async def list_airports():
+    """List supported airports."""
+    airports = []
+    for code, coords in AIRPORT_COORDS.items():
+        airports.append({
+            "code": code,
+            "delay_rate": AIRPORT_DELAY_RATES.get(code, 0.20),
+            "is_hub": code in HUB_AIRPORTS
+        })
+
+    return {
+        "count": len(airports),
+        "airports": sorted(airports, key=lambda x: x["code"])
+    }
+
+
+@app.post("/predict", response_model=PredictionResponse)
+async def predict_delay(request: FlightRequest):
+    """
+    Predict flight delay risk.
+
+    Takes origin, destination, departure time, and optional airline.
+    Returns risk level, probability, and contributing factors.
+    """
+    origin = request.origin.upper()
+    destination = request.destination.upper()
+    dep_time = request.departure_time
+    airline = request.airline.upper() if request.airline else None
+
+    # Validate airports
+    if origin not in AIRPORT_COORDS:
+        raise HTTPException(status_code=400, detail=f"Unknown origin airport: {origin}")
+    if destination not in AIRPORT_COORDS:
+        raise HTTPException(status_code=400, detail=f"Unknown destination airport: {destination}")
+
+    # Get weather data
+    weather_origin = await weather_service.get_weather(origin)
+    weather_dest = await weather_service.get_weather(destination)
+
+    # Build features
+    features = {
+        # Time features
+        'dep_hour': dep_time.hour,
+        'day_of_week': dep_time.isoweekday(),
+        'month': dep_time.month,
+        'is_weekend': 1 if dep_time.isoweekday() >= 6 else 0,
+        'is_morning': 1 if 5 <= dep_time.hour < 12 else 0,
+        'is_afternoon': 1 if 12 <= dep_time.hour < 18 else 0,
+        'is_evening': 1 if 18 <= dep_time.hour < 22 else 0,
+        'is_night': 1 if dep_time.hour >= 22 or dep_time.hour < 5 else 0,
+        'season': get_season(dep_time.month),
+        'days_to_holiday': get_days_to_holiday(dep_time),
+        'is_holiday_period': 1 if get_days_to_holiday(dep_time) <= 3 else 0,
+
+        # Airport features
+        'origin_delay_rate': AIRPORT_DELAY_RATES.get(origin, 0.20),
+        'dest_delay_rate': AIRPORT_DELAY_RATES.get(destination, 0.20),
+        'route_delay_rate': (AIRPORT_DELAY_RATES.get(origin, 0.20) + AIRPORT_DELAY_RATES.get(destination, 0.20)) / 2,
+        'airline_delay_rate': AIRLINE_DELAY_RATES.get(airline, 0.21) if airline else 0.21,
+        'origin_is_hub': 1 if origin in HUB_AIRPORTS else 0,
+        'dest_is_hub': 1 if destination in HUB_AIRPORTS else 0,
+        'distance': estimate_distance(origin, destination),
+    }
+
+    # Add weather features
+    if weather_origin:
+        features['origin_temp_f'] = weather_origin['temperature_f']
+        features['origin_wind_mph'] = weather_origin['wind_speed_mph']
+        features['origin_visibility'] = weather_origin['visibility_miles']
+        features['low_visibility'] = 1 if weather_origin['visibility_miles'] < 3 else 0
+        features['high_wind'] = 1 if weather_origin['wind_speed_mph'] > 20 else 0
+        features['freezing_temp'] = 1 if weather_origin['temperature_f'] < 32 else 0
+        features['severe_weather'] = 1 if (features['low_visibility'] or features['high_wind'] or features['freezing_temp']) else 0
+    else:
+        # Defaults if no weather
+        features.update({
+            'origin_temp_f': 60, 'origin_wind_mph': 10, 'origin_visibility': 10,
+            'low_visibility': 0, 'high_wind': 0, 'freezing_temp': 0, 'severe_weather': 0
+        })
+
+    # Make prediction
+    probability, risk_level = model_service.predict(features)
+
+    # Get risk factors and recommendations
+    risk_factors = get_risk_factors(features, weather_origin, weather_dest)
+    recommendations = get_recommendations(risk_level, risk_factors)
+
+    # Build response
+    response = PredictionResponse(
+        risk_level=risk_level,
+        delay_probability=round(probability, 3),
+        confidence=round(max(probability, 1 - probability), 3),
+        origin=origin,
+        destination=destination,
+        departure_time=dep_time.isoformat(),
+        airline=airline,
+        origin_weather=WeatherData(**weather_origin) if weather_origin else None,
+        destination_weather=WeatherData(**weather_dest) if weather_dest else None,
+        risk_factors=risk_factors,
+        recommendations=recommendations
+    )
+
+    return response
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

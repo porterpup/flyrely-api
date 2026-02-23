@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlyRely - Flight Delay Predictor</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .tagline {
+            color: #94a3b8;
+            margin-top: 8px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            backdrop-filter: blur(10px);
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 20px;
+            color: #e2e8f0;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-bottom: 6px;
+        }
+
+        input, select {
+            padding: 12px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus {
+            border-color: #00d4ff;
+        }
+
+        input::placeholder {
+            color: #64748b;
+        }
+
+        select option {
+            background: #1a1a2e;
+            color: #fff;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Demo Mode Toggle */
+        .demo-mode-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        .demo-mode-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            color: #00d4ff;
+            font-weight: 500;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            padding: 0;
+            margin: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.2);
+            transition: 0.3s;
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 2px;
+            background-color: #fff;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: #00d4ff;
+            border-color: #00d4ff;
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+
+        .api-url-row {
+            transition: all 0.3s ease;
+        }
+
+        .api-url-row.hidden {
+            display: none;
+        }
+
+        .demo-mode-status {
+            display: none;
+            padding: 12px 16px;
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: 8px;
+            color: #00d4ff;
+            font-size: 0.9rem;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .demo-mode-status.show {
+            display: block;
+        }
+
+        /* Results */
+        .results {
+            display: none;
+        }
+
+        .results.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .risk-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+
+        .risk-low {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 2px solid #22c55e;
+        }
+
+        .risk-medium {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+            border: 2px solid #eab308;
+        }
+
+        .risk-high {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 2px solid #ef4444;
+        }
+
+        .probability {
+            font-size: 3rem;
+            font-weight: 700;
+            margin: 20px 0;
+        }
+
+        .probability span {
+            font-size: 1.5rem;
+            color: #94a3b8;
+        }
+
+        .flight-route {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+        }
+
+        .airport-code {
+            font-weight: 700;
+            color: #00d4ff;
+        }
+
+        .arrow {
+            color: #64748b;
+        }
+
+        .weather-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin: 20px 0;
+        }
+
+        @media (max-width: 600px) {
+            .weather-cards {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .weather-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .weather-card h4 {
+            color: #94a3b8;
+            font-size: 0.875rem;
+            margin-bottom: 12px;
+        }
+
+        .weather-data {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .weather-item {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .weather-item .label {
+            color: #64748b;
+        }
+
+        .factors-list, .recommendations-list {
+            list-style: none;
+            margin-top: 12px;
+        }
+
+        .factors-list li, .recommendations-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .factors-list li:last-child, .recommendations-list li:last-child {
+            border-bottom: none;
+        }
+
+        .icon {
+            flex-shrink: 0;
+        }
+
+        /* API Config */
+        .api-config {
+            margin-bottom: 24px;
+        }
+
+        .api-config input {
+            width: 100%;
+        }
+
+        .api-status {
+            margin-top: 8px;
+            font-size: 0.875rem;
+        }
+
+        .api-status.connected {
+            color: #22c55e;
+        }
+
+        .api-status.error {
+            color: #ef4444;
+        }
+
+        /* Error */
+        .error-message {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            padding: 16px;
+            color: #ef4444;
+            margin-top: 16px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        /* Loading */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+
+        footer a {
+            color: #00d4ff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">✈️ FlyRely</div>
+            <p class="tagline">AI-Powered Flight Delay Predictions</p>
+        </header>
+
+        <!-- API Configuration -->
+        <div class="card api-config">
+            <h2>🔌 API Connection</h2>
+
+            <!-- Demo Mode Toggle -->
+            <div class="demo-mode-container">
+                <span class="demo-mode-label">
+                    <span>📊 Demo Mode</span>
+                </span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="demoModeToggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="demo-mode-status show" id="demoModeStatus">
+                Demo Mode - No server required. Using simulated predictions.
+            </div>
+
+            <div class="api-url-row hidden" id="apiUrlRow">
+                <div class="form-group">
+                    <label for="apiUrl">API URL</label>
+                    <input type="text" id="apiUrl" value="http://localhost:8000" placeholder="https://your-api.railway.app">
+                </div>
+            </div>
+
+            <div class="api-status" id="apiStatus">Demo Mode Active - Ready to predict</div>
+        </div>
+
+        <!-- Search Form -->
+        <div class="card">
+            <h2>🔍 Check Your Flight</h2>
+            <form id="flightForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="origin">From</label>
+                        <select id="origin" required>
+                            <option value="">Select airport</option>
+                            <option value="ATL">ATL - Atlanta</option>
+                            <option value="AUS">AUS - Austin</option>
+                            <option value="BNA">BNA - Nashville</option>
+                            <option value="BOS">BOS - Boston</option>
+                            <option value="BWI">BWI - Baltimore</option>
+                            <option value="CLT">CLT - Charlotte</option>
+                            <option value="DCA">DCA - Washington Reagan</option>
+                            <option value="DEN">DEN - Denver</option>
+                            <option value="DFW">DFW - Dallas/Fort Worth</option>
+                            <option value="DTW">DTW - Detroit</option>
+                            <option value="EWR">EWR - Newark</option>
+                            <option value="FLL">FLL - Fort Lauderdale</option>
+                            <option value="IAH">IAH - Houston</option>
+                            <option value="JFK" selected>JFK - New York JFK</option>
+                            <option value="LAS">LAS - Las Vegas</option>
+                            <option value="LAX">LAX - Los Angeles</option>
+                            <option value="LGA">LGA - New York LaGuardia</option>
+                            <option value="MCO">MCO - Orlando</option>
+                            <option value="MDW">MDW - Chicago Midway</option>
+                            <option value="MIA">MIA - Miami</option>
+                            <option value="MSP">MSP - Minneapolis</option>
+                            <option value="ORD">ORD - Chicago O'Hare</option>
+                            <option value="PDX">PDX - Portland</option>
+                            <option value="PHL">PHL - Philadelphia</option>
+                            <option value="PHX">PHX - Phoenix</option>
+                            <option value="SAN">SAN - San Diego</option>
+                            <option value="SEA">SEA - Seattle</option>
+                            <option value="SFO">SFO - San Francisco</option>
+                            <option value="SLC">SLC - Salt Lake City</option>
+                            <option value="TPA">TPA - Tampa</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="destination">To</label>
+                        <select id="destination" required>
+                            <option value="">Select airport</option>
+                            <option value="ATL">ATL - Atlanta</option>
+                            <option value="AUS">AUS - Austin</option>
+                            <option value="BNA">BNA - Nashville</option>
+                            <option value="BOS">BOS - Boston</option>
+                            <option value="BWI">BWI - Baltimore</option>
+                            <option value="CLT">CLT - Charlotte</option>
+                            <option value="DCA">DCA - Washington Reagan</option>
+                            <option value="DEN">DEN - Denver</option>
+                            <option value="DFW">DFW - Dallas/Fort Worth</option>
+                            <option value="DTW">DTW - Detroit</option>
+                            <option value="EWR">EWR - Newark</option>
+                            <option value="FLL">FLL - Fort Lauderdale</option>
+                            <option value="IAH">IAH - Houston</option>
+                            <option value="JFK">JFK - New York JFK</option>
+                            <option value="LAS">LAS - Las Vegas</option>
+                            <option value="LAX" selected>LAX - Los Angeles</option>
+                            <option value="LGA">LGA - New York LaGuardia</option>
+                            <option value="MCO">MCO - Orlando</option>
+                            <option value="MDW">MDW - Chicago Midway</option>
+                            <option value="MIA">MIA - Miami</option>
+                            <option value="MSP">MSP - Minneapolis</option>
+                            <option value="ORD">ORD - Chicago O'Hare</option>
+                            <option value="PDX">PDX - Portland</option>
+                            <option value="PHL">PHL - Philadelphia</option>
+                            <option value="PHX">PHX - Phoenix</option>
+                            <option value="SAN">SAN - San Diego</option>
+                            <option value="SEA">SEA - Seattle</option>
+                            <option value="SFO">SFO - San Francisco</option>
+                            <option value="SLC">SLC - Salt Lake City</option>
+                            <option value="TPA">TPA - Tampa</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="date">Date</label>
+                        <input type="date" id="date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="time">Departure Time</label>
+                        <input type="time" id="time" value="14:30" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="airline">Airline (optional)</label>
+                        <select id="airline">
+                            <option value="">Any airline</option>
+                            <option value="AA">American Airlines</option>
+                            <option value="DL">Delta</option>
+                            <option value="UA">United</option>
+                            <option value="WN">Southwest</option>
+                            <option value="B6">JetBlue</option>
+                            <option value="AS">Alaska</option>
+                            <option value="NK">Spirit</option>
+                            <option value="F9">Frontier</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="justify-content: flex-end;">
+                        <button type="submit" class="btn btn-primary" id="submitBtn">
+                            Check Flight Risk
+                        </button>
+                    </div>
+                </div>
+            </form>
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Analyzing flight conditions...</p>
+        </div>
+
+        <!-- Results -->
+        <div class="results card" id="results">
+            <div style="text-align: center;">
+                <div class="flight-route">
+                    <span class="airport-code" id="resultOrigin">JFK</span>
+                    <span class="arrow">→</span>
+                    <span class="airport-code" id="resultDest">LAX</span>
+                </div>
+                <div class="risk-badge" id="riskBadge">
+                    <span id="riskEmoji">🟡</span>
+                    <span id="riskLevel">MEDIUM RISK</span>
+                </div>
+                <div class="probability">
+                    <span id="probability">32</span><span>% chance of delay</span>
+                </div>
+            </div>
+
+            <!-- Weather -->
+            <div class="weather-cards" id="weatherSection">
+                <div class="weather-card">
+                    <h4>🛫 Origin Weather</h4>
+                    <div class="weather-data" id="originWeather">
+                        <div class="weather-item">
+                            <span class="label">Temperature</span>
+                            <span id="originTemp">--°F</span>
+                        </div>
+                        <div class="weather-item">
+                            <span class="label">Wind</span>
+                            <span id="originWind">-- mph</span>
+                        </div>
+                        <div class="weather-item">
+                            <span class="label">Visibility</span>
+                            <span id="originVis">-- mi</span>
+                        </div>
+                        <div class="weather-item">
+                            <span class="label">Conditions</span>
+                            <span id="originCond">--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="weather-card">
+                    <h4>🛬 Destination Weather</h4>
+                    <div class="weather-data" id="destWeather">
+                        <div class="weather-item">
+                            <span class="label">Temperature</span>
+                            <span id="destTemp">--°F</span>
+                        </div>
+                        <div class="weather-item">
+                            <span class="label">Wind</span>
+                            <span id="destWind">-- mph</span>
+                        </div>
+                        <div class="weather-item">
+                            <span class="label">Visibility</span>
+                            <span id="destVis">-- mi</span>
+                        </div>
+                        <div class="weather-item">
+                            <span class="label">Conditions</span>
+                            <span id="destCond">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risk Factors -->
+            <div id="factorsSection" style="margin-top: 20px;">
+                <h4>⚠️ Risk Factors</h4>
+                <ul class="factors-list" id="factorsList"></ul>
+            </div>
+
+            <!-- Recommendations -->
+            <div id="recommendationsSection" style="margin-top: 20px;">
+                <h4>💡 Recommendations</h4>
+                <ul class="recommendations-list" id="recommendationsList"></ul>
+            </div>
+        </div>
+
+        <footer>
+            <p>Powered by <a href="#">FlyRely API</a> • Predictions based on historical data and real-time weather</p>
+        </footer>
+    </div>
+
+    <script>
+        // Airport delay rates
+        const airportDelayRates = {
+            'JFK': 0.26, 'ORD': 0.25, 'LAX': 0.18, 'ATL': 0.21, 'SFO': 0.24,
+            'DEN': 0.19, 'DFW': 0.22, 'MIA': 0.23, 'SEA': 0.17, 'BOS': 0.23,
+            'EWR': 0.28, 'LGA': 0.27, 'AUS': 0.16, 'BNA': 0.18, 'BWI': 0.20,
+            'CLT': 0.19, 'DCA': 0.21, 'DTW': 0.20, 'FLL': 0.19, 'IAH': 0.20,
+            'LAS': 0.15, 'MCO': 0.18, 'MDW': 0.22, 'MSP': 0.19, 'PDX': 0.15,
+            'PHL': 0.22, 'PHX': 0.16, 'SAN': 0.14, 'SLC': 0.17, 'TPA': 0.18
+        };
+
+        // Set default date to 7 days from now
+        const defaultDate = new Date();
+        defaultDate.setDate(defaultDate.getDate() + 7);
+        document.getElementById('date').value = defaultDate.toISOString().split('T')[0];
+
+        // Demo Mode Toggle Handler
+        document.getElementById('demoModeToggle').addEventListener('change', (e) => {
+            const isDemoMode = e.target.checked;
+            const apiUrlRow = document.getElementById('apiUrlRow');
+            const demoStatus = document.getElementById('demoModeStatus');
+            const apiStatus = document.getElementById('apiStatus');
+
+            if (isDemoMode) {
+                apiUrlRow.classList.add('hidden');
+                demoStatus.classList.add('show');
+                apiStatus.textContent = 'Demo Mode Active - Ready to predict';
+                apiStatus.className = 'api-status connected';
+            } else {
+                apiUrlRow.classList.remove('hidden');
+                demoStatus.classList.remove('show');
+                apiStatus.textContent = 'Click "Check Flight" to test connection';
+                apiStatus.className = 'api-status';
+            }
+        });
+
+        // Generate mock weather data based on airport and month
+        function generateMockWeather(airport, month) {
+            const seasonalTemp = {
+                // Winter (Dec, Jan, Feb)
+                'winter': { avg: 35, range: 20 },
+                // Spring (Mar, Apr, May)
+                'spring': { avg: 55, range: 15 },
+                // Summer (Jun, Jul, Aug)
+                'summer': { avg: 75, range: 12 },
+                // Fall (Sep, Oct, Nov)
+                'fall': { avg: 60, range: 18 }
+            };
+
+            let season = 'spring';
+            if ([12, 1, 2].includes(month)) season = 'winter';
+            else if ([3, 4, 5].includes(month)) season = 'spring';
+            else if ([6, 7, 8].includes(month)) season = 'summer';
+            else if ([9, 10, 11].includes(month)) season = 'fall';
+
+            const tempData = seasonalTemp[season];
+            const baseTemp = tempData.avg + (Math.random() - 0.5) * tempData.range;
+            const wind = 8 + Math.random() * 12;
+            const visibility = 8 + Math.random() * 2;
+
+            const conditions = ['Clear', 'Partly Cloudy', 'Cloudy', 'Light Rain', 'Moderate Wind'];
+            const condition = conditions[Math.floor(Math.random() * conditions.length)];
+
+            return {
+                temperature_f: baseTemp,
+                wind_speed_mph: wind,
+                visibility_miles: visibility,
+                conditions: condition
+            };
+        }
+
+        // Generate realistic mock prediction
+        function generateMockPrediction(origin, destination, departureTime) {
+            const date = new Date(departureTime);
+            const hour = date.getHours();
+            const month = date.getMonth() + 1;
+
+            // Base delay probability from airport rates
+            let probability = (airportDelayRates[destination] || 0.20);
+
+            // Time-of-day adjustments
+            if (hour >= 17 && hour <= 21) {
+                probability += 0.10; // Evening flights +10%
+            } else if (hour >= 12 && hour <= 16) {
+                probability += 0.05; // Afternoon +5%
+            } else if (hour >= 6 && hour <= 11) {
+                probability -= 0.05; // Morning -5%
+            }
+
+            // Seasonal adjustments
+            if ([6, 7, 8].includes(month)) {
+                probability += 0.05; // Summer +5%
+            } else if (month === 12) {
+                probability += 0.08; // December holidays +8%
+            }
+
+            // Cap between 0 and 1
+            probability = Math.max(0, Math.min(1, probability));
+
+            // Determine risk level
+            let riskLevel = 'low';
+            if (probability > 0.30) riskLevel = 'high';
+            else if (probability > 0.18) riskLevel = 'medium';
+
+            // Generate risk factors
+            const factors = [];
+            if (probability > 0.25) {
+                factors.push('Destination airport has higher delay history');
+            }
+            if (hour >= 17 && hour <= 21) {
+                factors.push('Evening departure times experience more congestion');
+            }
+            if ([6, 7, 8].includes(month)) {
+                factors.push('Summer travel season typically sees increased delays');
+            }
+            if (month === 12) {
+                factors.push('Holiday season travel increases airport congestion');
+            }
+            if (airportDelayRates[destination] > 0.25) {
+                factors.push(`${destination} airport operates near capacity during peak hours`);
+            }
+
+            // Generate recommendations
+            const recommendations = [];
+            if (probability > 0.25) {
+                recommendations.push('Consider arriving at the airport 3+ hours before departure');
+                recommendations.push('Have backup flight options ready just in case');
+            } else {
+                recommendations.push('Arrival 2 hours before departure should be sufficient');
+            }
+            recommendations.push('Monitor weather conditions 24 hours before your flight');
+            if (hour >= 17 && hour <= 21) {
+                recommendations.push('Consider an earlier departure time to avoid peak congestion');
+            }
+
+            return {
+                origin,
+                destination,
+                departure_time: departureTime,
+                delay_probability: probability,
+                risk_level: riskLevel,
+                risk_factors: factors.length > 0 ? factors : ['No major risk factors identified'],
+                recommendations: recommendations,
+                origin_weather: generateMockWeather(origin, month),
+                destination_weather: generateMockWeather(destination, month)
+            };
+        }
+
+        // Form submission
+        document.getElementById('flightForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const isDemoMode = document.getElementById('demoModeToggle').checked;
+            const origin = document.getElementById('origin').value;
+            const destination = document.getElementById('destination').value;
+            const date = document.getElementById('date').value;
+            const time = document.getElementById('time').value;
+            const airline = document.getElementById('airline').value;
+
+            // Validate
+            if (origin === destination) {
+                showError('Origin and destination cannot be the same');
+                return;
+            }
+
+            // Build departure time
+            const departureTime = `${date}T${time}:00`;
+
+            // Show loading
+            document.getElementById('loading').classList.add('show');
+            document.getElementById('results').classList.remove('show');
+            document.getElementById('errorMessage').classList.remove('show');
+            document.getElementById('submitBtn').disabled = true;
+
+            try {
+                let data;
+
+                if (isDemoMode) {
+                    // Use mock data
+                    data = generateMockPrediction(origin, destination, departureTime);
+                    // Simulate slight delay
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    // Update API status
+                    document.getElementById('apiStatus').textContent = '✓ Demo Mode - Using simulated data';
+                    document.getElementById('apiStatus').className = 'api-status connected';
+                } else {
+                    // Use real API
+                    const apiUrl = document.getElementById('apiUrl').value.replace(/\/$/, '');
+                    const payload = {
+                        origin,
+                        destination,
+                        departure_time: departureTime
+                    };
+                    if (airline) payload.airline = airline;
+
+                    const response = await fetch(`${apiUrl}/predict`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'API request failed');
+                    }
+
+                    data = await response.json();
+
+                    // Update API status
+                    document.getElementById('apiStatus').textContent = '✓ Connected';
+                    document.getElementById('apiStatus').className = 'api-status connected';
+                }
+
+                displayResults(data);
+
+            } catch (error) {
+                showError(error.message);
+                document.getElementById('apiStatus').textContent = '✗ ' + error.message;
+                document.getElementById('apiStatus').className = 'api-status error';
+            } finally {
+                document.getElementById('loading').classList.remove('show');
+                document.getElementById('submitBtn').disabled = false;
+            }
+        });
+
+        function displayResults(data) {
+            // Route
+            document.getElementById('resultOrigin').textContent = data.origin;
+            document.getElementById('resultDest').textContent = data.destination;
+
+            // Risk level
+            const riskBadge = document.getElementById('riskBadge');
+            const riskEmoji = document.getElementById('riskEmoji');
+            const riskLevel = document.getElementById('riskLevel');
+
+            riskBadge.className = 'risk-badge risk-' + data.risk_level;
+
+            if (data.risk_level === 'low') {
+                riskEmoji.textContent = '🟢';
+                riskLevel.textContent = 'LOW RISK';
+            } else if (data.risk_level === 'medium') {
+                riskEmoji.textContent = '🟡';
+                riskLevel.textContent = 'MEDIUM RISK';
+            } else {
+                riskEmoji.textContent = '🔴';
+                riskLevel.textContent = 'HIGH RISK';
+            }
+
+            // Probability
+            document.getElementById('probability').textContent = Math.round(data.delay_probability * 100);
+
+            // Weather
+            if (data.origin_weather) {
+                document.getElementById('originTemp').textContent = Math.round(data.origin_weather.temperature_f) + '°F';
+                document.getElementById('originWind').textContent = Math.round(data.origin_weather.wind_speed_mph) + ' mph';
+                document.getElementById('originVis').textContent = data.origin_weather.visibility_miles.toFixed(1) + ' mi';
+                document.getElementById('originCond').textContent = data.origin_weather.conditions;
+            } else {
+                document.getElementById('originTemp').textContent = 'N/A';
+                document.getElementById('originWind').textContent = 'N/A';
+                document.getElementById('originVis').textContent = 'N/A';
+                document.getElementById('originCond').textContent = 'No data';
+            }
+
+            if (data.destination_weather) {
+                document.getElementById('destTemp').textContent = Math.round(data.destination_weather.temperature_f) + '°F';
+                document.getElementById('destWind').textContent = Math.round(data.destination_weather.wind_speed_mph) + ' mph';
+                document.getElementById('destVis').textContent = data.destination_weather.visibility_miles.toFixed(1) + ' mi';
+                document.getElementById('destCond').textContent = data.destination_weather.conditions;
+            } else {
+                document.getElementById('destTemp').textContent = 'N/A';
+                document.getElementById('destWind').textContent = 'N/A';
+                document.getElementById('destVis').textContent = 'N/A';
+                document.getElementById('destCond').textContent = 'No data';
+            }
+
+            // Risk factors
+            const factorsList = document.getElementById('factorsList');
+            factorsList.innerHTML = '';
+            if (data.risk_factors && data.risk_factors.length > 0) {
+                data.risk_factors.forEach(factor => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span class="icon">⚠️</span> ${factor}`;
+                    factorsList.appendChild(li);
+                });
+                document.getElementById('factorsSection').style.display = 'block';
+            } else {
+                document.getElementById('factorsSection').style.display = 'none';
+            }
+
+            // Recommendations
+            const recList = document.getElementById('recommendationsList');
+            recList.innerHTML = '';
+            if (data.recommendations && data.recommendations.length > 0) {
+                data.recommendations.forEach(rec => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span class="icon">💡</span> ${rec}`;
+                    recList.appendChild(li);
+                });
+                document.getElementById('recommendationsSection').style.display = 'block';
+            } else {
+                document.getElementById('recommendationsSection').style.display = 'none';
+            }
+
+            // Show results
+            document.getElementById('results').classList.add('show');
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = '❌ ' + message;
+            errorEl.classList.add('show');
+        }
+    </script>
+</body>
+</html>

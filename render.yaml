@@ -1,0 +1,15 @@
+# Render.com deployment configuration
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: flyrely-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: WEATHER_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: WEATHER_API_PROVIDER
+        value: tomorrow

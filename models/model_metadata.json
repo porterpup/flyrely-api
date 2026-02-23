@@ -1,0 +1,29 @@
+{
+  "model_type": "GradientBoosting",
+  "auc_roc": 0.6933,
+  "training_samples": 240000,
+  "features": [
+    "dep_hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "is_morning",
+    "is_afternoon",
+    "is_evening",
+    "is_night",
+    "season",
+    "is_holiday_period",
+    "days_to_holiday",
+    "origin_delay_rate",
+    "dest_delay_rate",
+    "route_delay_rate",
+    "airline_delay_rate",
+    "origin_is_hub",
+    "dest_is_hub",
+    "distance"
+  ],
+  "n_features": 18,
+  "delay_threshold_minutes": 15,
+  "trained_on": "BTS real data 2024-2025",
+  "model_size_mb": 0.1
+}
