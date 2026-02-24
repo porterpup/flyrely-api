@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
 from io import StringIO
+import re
 
 import numpy as np
 import pandas as pd
@@ -50,6 +51,11 @@ logger = logging.getLogger(__name__)
 # Weather API configuration (set via environment variables)
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")  # Tomorrow.io or OpenWeatherMap
 WEATHER_API_PROVIDER = os.getenv("WEATHER_API_PROVIDER", "tomorrow")  # "tomorrow" or "openweathermap"
+
+# Email notification configuration
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+AVIATION_STACK_KEY = os.getenv("AVIATION_STACK_KEY", "")
+NOTIFY_FROM_EMAIL = os.getenv("NOTIFY_FROM_EMAIL", "alerts@flyrely.app")
 
 # Model paths
 MODEL_DIR = Path(__file__).parent / "models"
@@ -251,6 +257,32 @@ class PredictionResponse(BaseModel):
 # =============================================================================
 # Weather Service
 # =============================================================================
+
+
+class NotifyRequest(BaseModel):
+    flight_number: str
+    origin: str
+    destination: str
+    scheduled_departure: str   # ISO string e.g. "2026-03-01T14:30:00"
+    airline: Optional[str] = None
+    risk_level: str
+    delay_probability: float
+    delay_minutes: Optional[int] = None
+    delay_reason: Optional[str] = None
+    recipient_email: str
+
+
+class FlightLookupResponse(BaseModel):
+    found: bool
+    flight_number: str
+    airline_name: Optional[str] = None
+    airline_code: Optional[str] = None
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    scheduled_departure: Optional[str] = None   # "HH:MM" local
+    scheduled_arrival: Optional[str] = None
+    status: Optional[str] = None
+    error: Optional[str] = None
 
 class WeatherService:
     """Service for fetching real-time weather data."""
@@ -792,6 +824,166 @@ async def export_usage():
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+
+
+# =============================================================================
+# Notification & Flight Lookup
+# =============================================================================
+
+@app.post("/notify")
+async def send_notification(req: NotifyRequest):
+    """
+    Send a delay alert email via Resend.
+    Called by the frontend when a flight's risk is medium or high.
+    """
+    if not RESEND_API_KEY:
+        raise HTTPException(status_code=503, detail="Email notifications not configured")
+
+    import resend
+    resend.api_key = RESEND_API_KEY
+
+    risk_emoji = "🔴" if req.risk_level == "high" else "🟡"
+    risk_label = "High Risk" if req.risk_level == "high" else "Medium Risk"
+    dep_dt = datetime.fromisoformat(req.scheduled_departure)
+    dep_formatted = dep_dt.strftime("%b %-d at %-I:%M %p")
+
+    delay_line = ""
+    if req.delay_minutes and req.delay_minutes > 0:
+        delay_line = f"<p style='margin:8px 0;color:#92400e;'><strong>Expected delay:</strong> {req.delay_minutes}–{req.delay_minutes+30} minutes</p>"
+
+    reason_line = ""
+    if req.delay_reason:
+        reason_line = f"<p style='margin:8px 0;color:#78350f;font-size:14px;'>{req.delay_reason}</p>"
+
+    html = f"""
+    <div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>
+      <div style='background:#1e3a5f;padding:24px;border-radius:12px 12px 0 0;'>
+        <h1 style='color:white;margin:0;font-size:20px;'>✈️ FlyRely Alert</h1>
+        <p style='color:rgba(255,255,255,0.7);margin:4px 0 0;font-size:14px;'>Flight delay prediction</p>
+      </div>
+      <div style='background:white;padding:24px;border:1px solid #e2e8f0;border-radius:0 0 12px 12px;'>
+        <div style='display:flex;align-items:center;gap:12px;margin-bottom:16px;'>
+          <span style='font-size:32px;'>{risk_emoji}</span>
+          <div>
+            <p style='margin:0;font-size:18px;font-weight:700;color:#0f172a;'>{req.flight_number}</p>
+            <p style='margin:2px 0 0;color:#64748b;font-size:14px;'>{req.airline_name or req.airline_code or "Unknown airline"}</p>
+          </div>
+        </div>
+        <div style='background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:16px;'>
+          <p style='margin:0 0 8px;font-weight:600;color:#0f172a;'>{req.origin} → {req.destination}</p>
+          <p style='margin:8px 0;color:#475569;'>Scheduled: {dep_formatted}</p>
+          {delay_line}
+          {reason_line}
+        </div>
+        <div style='background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:16px;'>
+          <p style='margin:0;font-weight:600;color:#92400e;'>{risk_label} · {round(req.delay_probability * 100)}% delay probability</p>
+        </div>
+        <p style='color:#94a3b8;font-size:12px;margin:0;'>
+          This alert was sent by FlyRely. Predictions are based on historical data and current weather conditions.
+        </p>
+      </div>
+    </div>
+    """
+
+    try:
+        params = {
+            "from": NOTIFY_FROM_EMAIL,
+            "to": [req.recipient_email],
+            "subject": f"{risk_emoji} {req.flight_number} – {risk_label} of Delay ({dep_formatted})",
+            "html": html,
+        }
+        resend.Emails.send(params)
+        return {"sent": True, "to": req.recipient_email}
+    except Exception as e:
+        logger.error(f"Resend error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
+
+@app.get("/flight-lookup", response_model=FlightLookupResponse)
+async def lookup_flight(
+    flight_number: str = Query(..., description="e.g. UA1071"),
+    date: str = Query(..., description="YYYY-MM-DD"),
+):
+    """
+    Look up a flight by number and date using AviationStack.
+    Returns origin, destination, scheduled departure time.
+    """
+    if not AVIATION_STACK_KEY:
+        return FlightLookupResponse(
+            found=False,
+            flight_number=flight_number,
+            error="Flight lookup not configured"
+        )
+
+    # Parse airline code and flight number
+    match = re.match(r'^([A-Z]{2})(\d+)$', flight_number.upper())
+    if not match:
+        return FlightLookupResponse(found=False, flight_number=flight_number, error="Invalid flight number format")
+
+    airline_iata, flight_num = match.groups()
+
+    try:
+        # AviationStack real-time flights endpoint
+        async with httpx.AsyncClient(timeout=10.0, proxy=None) as client:
+            resp = await client.get(
+                "https://api.aviationstack.com/v1/flights",
+                params={
+                    "access_key": AVIATION_STACK_KEY,
+                    "flight_iata": flight_number.upper(),
+                    "flight_date": date,
+                    "limit": 1,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        flights = data.get("data", [])
+        if not flights:
+            return FlightLookupResponse(found=False, flight_number=flight_number, error="Flight not found")
+
+        f = flights[0]
+        dep = f.get("departure", {})
+        arr = f.get("arrival", {})
+        airline = f.get("airline", {})
+
+        # Parse scheduled departure time (HH:MM)
+        sched_dep_iso = dep.get("scheduled", "")
+        sched_arr_iso = arr.get("scheduled", "")
+
+        dep_time = None
+        if sched_dep_iso:
+            try:
+                dep_time = datetime.fromisoformat(sched_dep_iso.replace("Z", "+00:00")).strftime("%H:%M")
+            except Exception:
+                dep_time = sched_dep_iso[11:16] if len(sched_dep_iso) >= 16 else None
+
+        arr_time = None
+        if sched_arr_iso:
+            try:
+                arr_time = datetime.fromisoformat(sched_arr_iso.replace("Z", "+00:00")).strftime("%H:%M")
+            except Exception:
+                arr_time = sched_arr_iso[11:16] if len(sched_arr_iso) >= 16 else None
+
+        return FlightLookupResponse(
+            found=True,
+            flight_number=flight_number.upper(),
+            airline_name=airline.get("name"),
+            airline_code=airline.get("iata", airline_iata),
+            origin=dep.get("iata"),
+            destination=arr.get("iata"),
+            scheduled_departure=dep_time,
+            scheduled_arrival=arr_time,
+            status=f.get("flight_status"),
+        )
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"AviationStack HTTP error: {e}")
+        return FlightLookupResponse(found=False, flight_number=flight_number, error="Lookup service error")
+    except Exception as e:
+        logger.error(f"Flight lookup error: {e}")
+        return FlightLookupResponse(found=False, flight_number=flight_number, error=str(e))
 
 
 @app.post("/predict", response_model=PredictionResponse)
