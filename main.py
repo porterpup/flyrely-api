@@ -926,14 +926,15 @@ async def lookup_flight(
     airline_iata, flight_num = match.groups()
 
     try:
-        # AviationStack real-time flights endpoint (free plan requires HTTP, not HTTPS)
+        # AviationStack real-time flights endpoint
+        # Free plan: HTTP only, no flight_date filter (date filtering is a paid feature)
+        # We search by flight_iata and return the most recent result
         async with httpx.AsyncClient(timeout=10.0, proxy=None) as client:
             resp = await client.get(
                 "http://api.aviationstack.com/v1/flights",
                 params={
                     "access_key": AVIATION_STACK_KEY,
                     "flight_iata": flight_number.upper(),
-                    "flight_date": date,
                     "limit": 1,
                 },
             )
