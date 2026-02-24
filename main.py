@@ -125,8 +125,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(UsageTrackingMiddleware)
-
 # =============================================================================
 # Usage Logging
 # =============================================================================
@@ -186,6 +184,9 @@ class UsageTrackingMiddleware(BaseHTTPMiddleware):
         logger.info(f"[usage] POST /predict completed in {elapsed_ms}ms — status={response.status_code}")
         return response
 
+
+# Register middleware now that the class is defined
+app.add_middleware(UsageTrackingMiddleware)
 
 # =============================================================================
 # Pydantic Models
