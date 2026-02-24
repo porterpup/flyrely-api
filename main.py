@@ -57,6 +57,14 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 AVIATION_STACK_KEY = os.getenv("AVIATION_STACK_KEY", "")
 NOTIFY_FROM_EMAIL = os.getenv("NOTIFY_FROM_EMAIL", "alerts@flyrely.app")
 
+# AeroAPI (FlightAware) configuration
+AEROAPI_KEY = os.getenv("AEROAPI_KEY", "")
+AEROAPI_BASE = "https://aeroapi.flightaware.com/aeroapi"
+AEROAPI_MONTHLY_CAP = int(os.getenv("AEROAPI_MONTHLY_CAP", "100"))  # hard cap on calls/month
+
+# Flight lookup cache — persisted to disk so it survives restarts
+LOOKUP_CACHE_PATH = Path(__file__).parent / "lookup_cache.json"
+
 # Model paths
 MODEL_DIR = Path(__file__).parent / "models"
 MODEL_PATH = MODEL_DIR / "flight_delay_model.joblib"
@@ -187,6 +195,101 @@ class UsageTrackingMiddleware(BaseHTTPMiddleware):
 
 # Register middleware now that the class is defined
 app.add_middleware(UsageTrackingMiddleware)
+
+# =============================================================================
+# Flight Lookup Cache + AeroAPI Call Counter
+# =============================================================================
+
+class LookupCache:
+    """
+    Persistent cache for flight lookup results.
+    Keyed by flight_number (uppercased). Results are route/airline data
+    which doesn't change frequently, so we cache indefinitely and only
+    invalidate on explicit clear.
+    """
+
+    def __init__(self, cache_path: Path):
+        self.cache_path = cache_path
+        self._data: dict = self._load()
+
+    def _load(self) -> dict:
+        if self.cache_path.exists():
+            try:
+                return json.loads(self.cache_path.read_text())
+            except Exception:
+                pass
+        return {}
+
+    def _save(self) -> None:
+        try:
+            self.cache_path.write_text(json.dumps(self._data, indent=2))
+        except Exception as e:
+            logger.warning(f"Cache save failed: {e}")
+
+    def get(self, key: str) -> Optional[dict]:
+        return self._data.get(key.upper())
+
+    def set(self, key: str, value: dict) -> None:
+        self._data[key.upper()] = value
+        self._save()
+
+    def size(self) -> int:
+        return len(self._data)
+
+
+class AeroAPICallCounter:
+    """
+    Tracks AeroAPI calls per calendar month and enforces a hard cap.
+    Persisted to disk so the count survives restarts.
+    """
+
+    COUNTER_PATH = Path(__file__).parent / "aeroapi_counter.json"
+
+    def __init__(self, monthly_cap: int):
+        self.monthly_cap = monthly_cap
+
+    def _load(self) -> dict:
+        if self.COUNTER_PATH.exists():
+            try:
+                return json.loads(self.COUNTER_PATH.read_text())
+            except Exception:
+                pass
+        return {}
+
+    def _save(self, data: dict) -> None:
+        try:
+            self.COUNTER_PATH.write_text(json.dumps(data))
+        except Exception as e:
+            logger.warning(f"AeroAPI counter save failed: {e}")
+
+    def _month_key(self) -> str:
+        return datetime.utcnow().strftime("%Y-%m")
+
+    def get_count(self) -> int:
+        return self._load().get(self._month_key(), 0)
+
+    def increment(self) -> int:
+        data = self._load()
+        key = self._month_key()
+        data[key] = data.get(key, 0) + 1
+        self._save(data)
+        return data[key]
+
+    def can_call(self) -> bool:
+        return self.get_count() < self.monthly_cap
+
+    def status(self) -> dict:
+        count = self.get_count()
+        return {
+            "calls_this_month": count,
+            "monthly_cap": self.monthly_cap,
+            "remaining": max(0, self.monthly_cap - count),
+            "cap_reached": count >= self.monthly_cap,
+        }
+
+
+lookup_cache = LookupCache(LOOKUP_CACHE_PATH)
+aeroapi_counter = AeroAPICallCounter(AEROAPI_MONTHLY_CAP)
 
 # =============================================================================
 # Pydantic Models
@@ -908,90 +1011,116 @@ async def lookup_flight(
     date: str = Query(..., description="YYYY-MM-DD"),
 ):
     """
-    Look up a flight by number and date using AviationStack.
-    Returns origin, destination, scheduled departure time.
+    Look up a flight by number and date using FlightAware AeroAPI.
+    Returns origin, destination, scheduled departure/arrival times.
+
+    Results are cached by flight number to conserve API calls.
+    A hard monthly cap prevents unexpected charges.
     """
-    if not AVIATION_STACK_KEY:
+    fn = flight_number.upper().strip()
+
+    # Validate format
+    if not re.match(r'^[A-Z]{2}\d{1,4}$', fn):
+        return FlightLookupResponse(
+            found=False, flight_number=fn, error="Invalid flight number format (e.g. AA100, UA1071)"
+        )
+
+    # 1. Check cache first — return immediately if we have it
+    cached = lookup_cache.get(fn)
+    if cached:
+        logger.info(f"[lookup] Cache hit for {fn}")
+        return FlightLookupResponse(**cached)
+
+    # 2. Check if AeroAPI is configured
+    if not AEROAPI_KEY:
+        return FlightLookupResponse(
+            found=False, flight_number=fn, error="Flight lookup not configured"
+        )
+
+    # 3. Enforce monthly cap before making any API call
+    if not aeroapi_counter.can_call():
+        status = aeroapi_counter.status()
+        logger.warning(f"[lookup] AeroAPI monthly cap reached ({status['calls_this_month']}/{status['monthly_cap']})")
         return FlightLookupResponse(
             found=False,
-            flight_number=flight_number,
-            error="Flight lookup not configured"
+            flight_number=fn,
+            error=f"Flight lookup limit reached for this month ({status['monthly_cap']} calls). Try again next month."
         )
 
-    # Parse airline code and flight number
-    match = re.match(r'^([A-Z]{2})(\d+)$', flight_number.upper())
-    if not match:
-        return FlightLookupResponse(found=False, flight_number=flight_number, error="Invalid flight number format")
-
-    airline_iata, flight_num = match.groups()
-
+    # 4. Call AeroAPI — /flights/{ident}/scheduled endpoint returns future schedules
     try:
-        # AviationStack real-time flights endpoint
-        # Free plan: HTTP only, no flight_date filter (date filtering is a paid feature)
-        # We search by flight_iata and return the most recent result
-        async with httpx.AsyncClient(timeout=10.0, proxy=None) as client:
+        headers = {"x-apikey": AEROAPI_KEY, "Accept": "application/json; charset=UTF-8"}
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Try the scheduled flights endpoint first (best for future dates)
             resp = await client.get(
-                "http://api.aviationstack.com/v1/flights",
-                params={
-                    "access_key": AVIATION_STACK_KEY,
-                    "flight_iata": flight_number.upper(),
-                    "limit": 1,
-                },
+                f"{AEROAPI_BASE}/schedules/{date}/{date}",
+                headers=headers,
+                params={"ident": fn, "max_pages": 1},
             )
+
+            # Increment counter after the call is made
+            call_count = aeroapi_counter.increment()
+            logger.info(f"[lookup] AeroAPI call #{call_count}/{AEROAPI_MONTHLY_CAP} for {fn} on {date}")
+
+            if resp.status_code == 401:
+                return FlightLookupResponse(found=False, flight_number=fn, error="Flight lookup API key invalid")
+
+            if resp.status_code == 404:
+                return FlightLookupResponse(found=False, flight_number=fn, error="Flight not found")
+
+            resp.raise_for_status()
             data = resp.json()
 
-        # AviationStack returns error info in JSON even when HTTP status is non-200
-        if "error" in data:
-            err = data["error"]
-            err_msg = err.get("info", str(err))
-            logger.error(f"AviationStack API error: {err_msg}")
-            return FlightLookupResponse(found=False, flight_number=flight_number, error=err_msg)
-
-        flights = data.get("data", [])
+        # AeroAPI /schedules returns {"scheduled": [...]}
+        flights = data.get("scheduled", [])
         if not flights:
-            return FlightLookupResponse(found=False, flight_number=flight_number, error="Flight not found")
+            return FlightLookupResponse(found=False, flight_number=fn, error="Flight not found for that date")
 
         f = flights[0]
-        dep = f.get("departure", {})
-        arr = f.get("arrival", {})
-        airline = f.get("airline", {})
 
-        # Parse scheduled departure time (HH:MM)
-        sched_dep_iso = dep.get("scheduled", "")
-        sched_arr_iso = arr.get("scheduled", "")
-
-        dep_time = None
-        if sched_dep_iso:
+        # Parse departure/arrival times from ISO strings
+        def parse_time(iso: Optional[str]) -> Optional[str]:
+            if not iso:
+                return None
             try:
-                dep_time = datetime.fromisoformat(sched_dep_iso.replace("Z", "+00:00")).strftime("%H:%M")
+                return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%H:%M")
             except Exception:
-                dep_time = sched_dep_iso[11:16] if len(sched_dep_iso) >= 16 else None
+                return iso[11:16] if iso and len(iso) >= 16 else None
 
-        arr_time = None
-        if sched_arr_iso:
-            try:
-                arr_time = datetime.fromisoformat(sched_arr_iso.replace("Z", "+00:00")).strftime("%H:%M")
-            except Exception:
-                arr_time = sched_arr_iso[11:16] if len(sched_arr_iso) >= 16 else None
-
-        return FlightLookupResponse(
+        result = FlightLookupResponse(
             found=True,
-            flight_number=flight_number.upper(),
-            airline_name=airline.get("name"),
-            airline_code=airline.get("iata", airline_iata),
-            origin=dep.get("iata"),
-            destination=arr.get("iata"),
-            scheduled_departure=dep_time,
-            scheduled_arrival=arr_time,
-            status=f.get("flight_status"),
+            flight_number=fn,
+            airline_name=f.get("operator_iata", ""),
+            airline_code=f.get("operator_iata", fn[:2]),
+            origin=f.get("origin", {}).get("code_iata") or f.get("origin", {}).get("code"),
+            destination=f.get("destination", {}).get("code_iata") or f.get("destination", {}).get("code"),
+            scheduled_departure=parse_time(f.get("scheduled_out") or f.get("scheduled_off")),
+            scheduled_arrival=parse_time(f.get("scheduled_in") or f.get("scheduled_on")),
+            status=f.get("status"),
         )
 
+        # 5. Cache the successful result
+        lookup_cache.set(fn, result.model_dump())
+        logger.info(f"[lookup] Cached result for {fn}: {result.origin} → {result.destination}")
+
+        return result
+
     except httpx.HTTPStatusError as e:
-        logger.error(f"AviationStack HTTP error: {e} — body: {e.response.text[:500]}")
-        return FlightLookupResponse(found=False, flight_number=flight_number, error="Lookup service error")
+        logger.error(f"AeroAPI HTTP error for {fn}: {e.response.status_code} — {e.response.text[:300]}")
+        return FlightLookupResponse(found=False, flight_number=fn, error="Lookup service error")
     except Exception as e:
-        logger.error(f"Flight lookup error: {e}")
-        return FlightLookupResponse(found=False, flight_number=flight_number, error=str(e))
+        logger.error(f"Flight lookup error for {fn}: {e}")
+        return FlightLookupResponse(found=False, flight_number=fn, error="Lookup service error")
+
+
+@app.get("/flight-lookup/status")
+async def lookup_status():
+    """Returns current AeroAPI call usage for this month."""
+    return {
+        **aeroapi_counter.status(),
+        "cache_size": lookup_cache.size(),
+    }
 
 
 @app.post("/predict", response_model=PredictionResponse)
