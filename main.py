@@ -21,18 +21,23 @@ API Endpoints:
 
 import os
 import json
+import csv
+import time
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
+from io import StringIO
 
 import numpy as np
 import pandas as pd
 import joblib
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +58,13 @@ FEATURES_PATH = MODEL_DIR / "feature_names.joblib"
 METADATA_PATH = MODEL_DIR / "model_metadata.json"
 SEVERITY_MODEL_PATH = MODEL_DIR / "delay_severity_model.joblib"
 SEVERITY_METADATA_PATH = MODEL_DIR / "delay_severity_metadata.json"
+
+# Usage log path (JSONL — one JSON record per line)
+USAGE_LOG_PATH = Path(__file__).parent / "usage_log.jsonl"
+
+# Weather API cost estimate: Tomorrow.io free tier = 500 calls/day
+# Paid plan ~$0.001 per call above free tier (rough estimate)
+WEATHER_COST_PER_CALL = 0.001  # USD
 
 # Airport coordinates for weather lookups
 AIRPORT_COORDS = {
@@ -107,6 +119,67 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(UsageTrackingMiddleware)
+
+# =============================================================================
+# Usage Logging
+# =============================================================================
+
+class UsageLogger:
+    """Logs each /predict call to a JSONL file for cost forecasting."""
+
+    def __init__(self, log_path: Path):
+        self.log_path = log_path
+
+    def record(self, entry: dict) -> None:
+        try:
+            with open(self.log_path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.warning(f"Usage log write failed: {e}")
+
+    def read_all(self) -> list[dict]:
+        if not self.log_path.exists():
+            return []
+        entries = []
+        try:
+            with open(self.log_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+        except Exception as e:
+            logger.warning(f"Usage log read failed: {e}")
+        return entries
+
+    def clear(self) -> None:
+        if self.log_path.exists():
+            self.log_path.unlink()
+
+
+usage_logger = UsageLogger(USAGE_LOG_PATH)
+
+
+class UsageTrackingMiddleware(BaseHTTPMiddleware):
+    """Times every /predict request and records it to the usage log."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path != "/predict" or request.method != "POST":
+            return await call_next(request)
+
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = round((time.perf_counter() - start) * 1000)
+
+        # We can't re-read the body after it's been consumed, so we log
+        # what we can from the request scope + a flag on the response.
+        # Detailed fields (origin, dest, etc.) are logged inside /predict itself.
+        logger.info(f"[usage] POST /predict completed in {elapsed_ms}ms — status={response.status_code}")
+        return response
+
 
 # =============================================================================
 # Pydantic Models
@@ -625,6 +698,102 @@ async def list_airports():
     }
 
 
+@app.get("/usage")
+async def get_usage(days: int = Query(default=30, ge=1, le=365)):
+    """
+    API usage summary for cost forecasting.
+
+    Returns daily call counts, total weather API calls, and estimated cost
+    for the last `days` days (default 30).
+    """
+    all_entries = usage_logger.read_all()
+    if not all_entries:
+        return {
+            "period_days": days,
+            "total_predictions": 0,
+            "total_weather_calls": 0,
+            "estimated_cost_usd": 0.0,
+            "daily": [],
+            "by_route": [],
+            "by_risk_level": {},
+            "message": "No usage data recorded yet. Make some predictions first.",
+        }
+
+    cutoff = datetime.now() - timedelta(days=days)
+    entries = [e for e in all_entries if datetime.fromisoformat(e["ts"]) >= cutoff]
+
+    # Daily aggregation
+    daily: dict[str, dict] = {}
+    route_counts: dict[str, int] = {}
+    risk_counts: dict[str, int] = {"low": 0, "medium": 0, "high": 0}
+    total_weather = 0
+
+    for e in entries:
+        date = e.get("date", e["ts"][:10])
+        if date not in daily:
+            daily[date] = {"date": date, "predictions": 0, "weather_calls": 0}
+        daily[date]["predictions"] += 1
+        wc = e.get("weather_calls", 0)
+        daily[date]["weather_calls"] += wc
+        total_weather += wc
+
+        route = f"{e.get('origin', '?')}→{e.get('destination', '?')}"
+        route_counts[route] = route_counts.get(route, 0) + 1
+
+        rl = e.get("risk_level", "unknown")
+        if rl in risk_counts:
+            risk_counts[rl] += 1
+
+    # Sort daily descending
+    daily_list = sorted(daily.values(), key=lambda x: x["date"], reverse=True)
+
+    # Top routes
+    top_routes = sorted(
+        [{"route": r, "predictions": c} for r, c in route_counts.items()],
+        key=lambda x: x["predictions"],
+        reverse=True,
+    )[:10]
+
+    # Cost estimate: weather calls above free tier (500/day) cost ~$0.001 each
+    # Simple estimate: total weather calls * cost per call (ignores free tier for simplicity)
+    estimated_cost = round(total_weather * WEATHER_COST_PER_CALL, 4)
+
+    return {
+        "period_days": days,
+        "total_predictions": len(entries),
+        "total_weather_calls": total_weather,
+        "estimated_cost_usd": estimated_cost,
+        "avg_predictions_per_day": round(len(entries) / max(days, 1), 1),
+        "daily": daily_list,
+        "top_routes": top_routes,
+        "by_risk_level": risk_counts,
+        "note": f"Cost estimate based on ${WEATHER_COST_PER_CALL}/weather API call. Tomorrow.io free tier: 500 calls/day.",
+    }
+
+
+@app.get("/usage/export")
+async def export_usage():
+    """Download all usage logs as a CSV file."""
+    entries = usage_logger.read_all()
+    if not entries:
+        raise HTTPException(status_code=404, detail="No usage data to export")
+
+    output = StringIO()
+    fieldnames = ["ts", "date", "origin", "destination", "airline", "departure_time",
+                  "risk_level", "delay_probability", "weather_fetched", "weather_calls", "model_ms"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(entries)
+
+    output.seek(0)
+    filename = f"flyrely_usage_{datetime.now().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_delay(request: FlightRequest):
     """
@@ -690,7 +859,9 @@ async def predict_delay(request: FlightRequest):
         })
 
     # Make prediction
+    _predict_start = time.perf_counter()
     probability, risk_level = model_service.predict(features)
+    _predict_ms = round((time.perf_counter() - _predict_start) * 1000)
 
     # Predict delay severity distribution
     delay_severity = model_service.predict_severity(features)
@@ -698,6 +869,21 @@ async def predict_delay(request: FlightRequest):
     # Get risk factors and recommendations
     risk_factors = get_risk_factors(features, weather_origin, weather_dest)
     recommendations = get_recommendations(risk_level, risk_factors)
+
+    # Log this prediction for usage/cost tracking
+    usage_logger.record({
+        "ts": datetime.now().isoformat(),
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "origin": origin,
+        "destination": destination,
+        "airline": airline,
+        "departure_time": dep_time.isoformat(),
+        "risk_level": risk_level,
+        "delay_probability": round(probability, 3),
+        "weather_fetched": weather_origin is not None or weather_dest is not None,
+        "weather_calls": (1 if weather_origin is not None else 0) + (1 if weather_dest is not None else 0),
+        "model_ms": _predict_ms,
+    })
 
     # Build response
     response = PredictionResponse(
