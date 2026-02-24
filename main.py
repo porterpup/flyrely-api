@@ -51,6 +51,8 @@ MODEL_DIR = Path(__file__).parent / "models"
 MODEL_PATH = MODEL_DIR / "flight_delay_model.joblib"
 FEATURES_PATH = MODEL_DIR / "feature_names.joblib"
 METADATA_PATH = MODEL_DIR / "model_metadata.json"
+SEVERITY_MODEL_PATH = MODEL_DIR / "delay_severity_model.joblib"
+SEVERITY_METADATA_PATH = MODEL_DIR / "delay_severity_metadata.json"
 
 # Airport coordinates for weather lookups
 AIRPORT_COORDS = {
@@ -136,11 +138,25 @@ class WeatherData(BaseModel):
     conditions: str
 
 
+class DelaySeverity(BaseModel):
+    """Conditional delay severity breakdown — probabilities given a delay occurs."""
+    minor_pct: float = Field(..., description="Probability of 15–44 min delay if delayed")
+    moderate_pct: float = Field(..., description="Probability of 45–119 min delay if delayed")
+    severe_pct: float = Field(..., description="Probability of 120+ min delay if delayed")
+    expected_delay_label: str = Field(..., description="Most likely severity bucket if delayed")
+    expected_delay_range: str = Field(..., description="Human-readable range, e.g. '15–44 min'")
+
+
 class PredictionResponse(BaseModel):
     """Response model for flight delay prediction."""
     risk_level: str = Field(..., description="Risk level: 'low', 'medium', or 'high'")
-    delay_probability: float = Field(..., description="Probability of delay (0-1)")
+    delay_probability: float = Field(..., description="Probability of any delay (0-1)")
     confidence: float = Field(..., description="Model confidence (0-1)")
+
+    # Delay severity (new) — only meaningful when delay_probability > 0
+    delay_severity: Optional[DelaySeverity] = Field(
+        None, description="Conditional breakdown of delay severity if a delay occurs"
+    )
 
     # Flight details
     origin: str
@@ -275,6 +291,8 @@ class ModelService:
         self.model = None
         self.feature_names = None
         self.metadata = None
+        self.severity_model = None
+        self.severity_metadata = None
         self._load_model()
 
     def _load_model(self):
@@ -294,6 +312,17 @@ class ModelService:
                 with open(METADATA_PATH) as f:
                     self.metadata = json.load(f)
                 logger.info(f"Model metadata loaded")
+
+            if SEVERITY_MODEL_PATH.exists():
+                self.severity_model = joblib.load(SEVERITY_MODEL_PATH)
+                logger.info(f"Severity model loaded from {SEVERITY_MODEL_PATH}")
+            else:
+                logger.warning(f"Severity model not found at {SEVERITY_MODEL_PATH}")
+
+            if SEVERITY_METADATA_PATH.exists():
+                with open(SEVERITY_METADATA_PATH) as f:
+                    self.severity_metadata = json.load(f)
+                logger.info(f"Severity metadata loaded")
 
         except Exception as e:
             logger.error(f"Error loading model: {e}")
@@ -375,6 +404,63 @@ class ModelService:
         risk_level = self._probability_to_risk(prob)
 
         return prob, risk_level
+
+    def predict_severity(self, features: dict) -> Optional["DelaySeverity"]:
+        """
+        Predict delay severity distribution using the multi-class model.
+
+        Returns a DelaySeverity with conditional probabilities (given a delay occurs):
+          minor_pct, moderate_pct, severe_pct sum to 1.0 across the three delay buckets.
+        Returns None if the severity model is not loaded.
+        """
+        if self.severity_model is None:
+            return None
+
+        try:
+            # Build 18-feature vector (severity model uses same features as binary model)
+            severity_feature_names = [
+                'dep_hour', 'day_of_week', 'month', 'is_weekend',
+                'is_morning', 'is_afternoon', 'is_evening', 'is_night',
+                'season', 'is_holiday_period', 'days_to_holiday',
+                'origin_delay_rate', 'dest_delay_rate', 'route_delay_rate',
+                'airline_delay_rate', 'origin_is_hub', 'dest_is_hub', 'distance',
+            ]
+            vector = [features.get(name, 0) for name in severity_feature_names]
+
+            # classes: [on_time, minor, moderate, severe]
+            proba = self.severity_model.predict_proba([vector])[0]  # shape (4,)
+
+            # Conditional distribution among the three delay buckets (indices 1,2,3)
+            delay_proba = proba[1:]  # [minor, moderate, severe]
+            delay_total = delay_proba.sum()
+
+            if delay_total < 1e-9:
+                # Model thinks almost no chance of delay — return uniform conditional
+                minor_pct = moderate_pct = severe_pct = round(1 / 3, 3)
+            else:
+                conditional = delay_proba / delay_total
+                minor_pct = round(float(conditional[0]), 3)
+                moderate_pct = round(float(conditional[1]), 3)
+                severe_pct = round(float(conditional[2]), 3)
+
+            # Most likely severity bucket
+            bucket_idx = int(np.argmax(delay_proba))  # 0=minor,1=moderate,2=severe
+            bucket_labels = ["minor", "moderate", "severe"]
+            bucket_ranges = ["15–44 min", "45–119 min", "120+ min"]
+            expected_label = bucket_labels[bucket_idx]
+            expected_range = bucket_ranges[bucket_idx]
+
+            return DelaySeverity(
+                minor_pct=minor_pct,
+                moderate_pct=moderate_pct,
+                severe_pct=severe_pct,
+                expected_delay_label=expected_label,
+                expected_delay_range=expected_range,
+            )
+
+        except Exception as e:
+            logger.error(f"Error in predict_severity: {e}")
+            return None
 
 
 # Initialize model service
@@ -606,6 +692,9 @@ async def predict_delay(request: FlightRequest):
     # Make prediction
     probability, risk_level = model_service.predict(features)
 
+    # Predict delay severity distribution
+    delay_severity = model_service.predict_severity(features)
+
     # Get risk factors and recommendations
     risk_factors = get_risk_factors(features, weather_origin, weather_dest)
     recommendations = get_recommendations(risk_level, risk_factors)
@@ -615,6 +704,7 @@ async def predict_delay(request: FlightRequest):
         risk_level=risk_level,
         delay_probability=round(probability, 3),
         confidence=round(max(probability, 1 - probability), 3),
+        delay_severity=delay_severity,
         origin=origin,
         destination=destination,
         departure_time=dep_time.isoformat(),

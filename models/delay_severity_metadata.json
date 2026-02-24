@@ -1,0 +1,48 @@
+{
+  "model_type": "GradientBoostingClassifier",
+  "classes": [
+    "on_time",
+    "minor",
+    "moderate",
+    "severe"
+  ],
+  "bucket_definitions": {
+    "on_time": "dep_delay < 15 min",
+    "minor": "15-44 min \u2014 Minor delay",
+    "moderate": "45-119 min \u2014 Significant delay",
+    "severe": "120+ min \u2014 Major delay"
+  },
+  "n_features": 18,
+  "feature_names": [
+    "dep_hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "is_morning",
+    "is_afternoon",
+    "is_evening",
+    "is_night",
+    "season",
+    "is_holiday_period",
+    "days_to_holiday",
+    "origin_delay_rate",
+    "dest_delay_rate",
+    "route_delay_rate",
+    "airline_delay_rate",
+    "origin_is_hub",
+    "dest_is_hub",
+    "distance"
+  ],
+  "overall_accuracy": 0.5249,
+  "training_samples": 188000,
+  "model_parameters": {
+    "n_estimators": 150,
+    "max_depth": 5,
+    "learning_rate": 0.08,
+    "subsample": 0.8,
+    "min_samples_leaf": 15
+  },
+  "training_note": "Realistic-proportion sample: 120k on_time, 45k minor, 40k moderate, 30k severe",
+  "trained_on": "BTS 2024-2025",
+  "training_date": "2026-02-24T03:20:27.841212"
+}
