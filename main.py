@@ -937,8 +937,14 @@ async def lookup_flight(
                     "limit": 1,
                 },
             )
-            resp.raise_for_status()
             data = resp.json()
+
+        # AviationStack returns error info in JSON even when HTTP status is non-200
+        if "error" in data:
+            err = data["error"]
+            err_msg = err.get("info", str(err))
+            logger.error(f"AviationStack API error: {err_msg}")
+            return FlightLookupResponse(found=False, flight_number=flight_number, error=err_msg)
 
         flights = data.get("data", [])
         if not flights:
@@ -980,7 +986,7 @@ async def lookup_flight(
         )
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"AviationStack HTTP error: {e}")
+        logger.error(f"AviationStack HTTP error: {e} — body: {e.response.text[:500]}")
         return FlightLookupResponse(found=False, flight_number=flight_number, error="Lookup service error")
     except Exception as e:
         logger.error(f"Flight lookup error: {e}")
