@@ -579,10 +579,12 @@ class ModelService:
         return vector
 
     def _probability_to_risk(self, prob: float) -> str:
-        """Convert probability to risk level."""
-        if prob < 0.25:
+        """Convert probability to risk level. Updated thresholds to match model calibration:
+        Low < 0.15, Medium 0.15–0.25, High > 0.25
+        """
+        if prob < 0.15:
             return "low"
-        elif prob < 0.50:
+        elif prob < 0.25:
             return "medium"
         else:
             return "high"
