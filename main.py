@@ -579,12 +579,12 @@ class ModelService:
         return vector
 
     def _probability_to_risk(self, prob: float) -> str:
-        """Convert probability to risk level. Updated thresholds to match model calibration:
-        Low < 0.15, Medium 0.15–0.25, High > 0.25
+        """Convert probability to risk level. Calibration v2 thresholds:
+        Low < 0.20, Medium 0.20–0.30, High > 0.30
         """
-        if prob < 0.15:
+        if prob < 0.20:
             return "low"
-        elif prob < 0.25:
+        elif prob < 0.30:
             return "medium"
         else:
             return "high"
@@ -1139,10 +1139,14 @@ async def predict_delay(request: FlightRequest):
     airline = request.airline.upper() if request.airline else None
 
     # Validate airports
-    if origin not in AIRPORT_COORDS:
-        raise HTTPException(status_code=400, detail=f"Unknown origin airport: {origin}")
-    if destination not in AIRPORT_COORDS:
-        raise HTTPException(status_code=400, detail=f"Unknown destination airport: {destination}")
+    # If an airport isn't known, don't return 400. Use airline-level or global defaults
+    # so we can still provide a prediction. Log a warning for visibility.
+    origin_known = origin in AIRPORT_COORDS
+    dest_known = destination in AIRPORT_COORDS
+    if not origin_known:
+        logger.warning(f"Unknown origin airport: {origin} — falling back to airline/global defaults")
+    if not dest_known:
+        logger.warning(f"Unknown destination airport: {destination} — falling back to airline/global defaults")
 
     # Get weather data
     weather_origin = await weather_service.get_weather(origin)
@@ -1163,14 +1167,17 @@ async def predict_delay(request: FlightRequest):
         'days_to_holiday': get_days_to_holiday(dep_time),
         'is_holiday_period': 1 if get_days_to_holiday(dep_time) <= 3 else 0,
 
-        # Airport features
-        'origin_delay_rate': AIRPORT_DELAY_RATES.get(origin, 0.20),
-        'dest_delay_rate': AIRPORT_DELAY_RATES.get(destination, 0.20),
-        'route_delay_rate': (AIRPORT_DELAY_RATES.get(origin, 0.20) + AIRPORT_DELAY_RATES.get(destination, 0.20)) / 2,
+        # Airport features — allow fallbacks if airport codes unknown
+        'origin_delay_rate': AIRPORT_DELAY_RATES.get(origin, AIRLINE_DELAY_RATES.get(airline, 0.20)),
+        'dest_delay_rate': AIRPORT_DELAY_RATES.get(destination, AIRLINE_DELAY_RATES.get(airline, 0.20)),
+        'route_delay_rate': (
+            AIRPORT_DELAY_RATES.get(origin, AIRLINE_DELAY_RATES.get(airline, 0.20))
+            + AIRPORT_DELAY_RATES.get(destination, AIRLINE_DELAY_RATES.get(airline, 0.20))
+        ) / 2,
         'airline_delay_rate': AIRLINE_DELAY_RATES.get(airline, 0.21) if airline else 0.21,
         'origin_is_hub': 1 if origin in HUB_AIRPORTS else 0,
         'dest_is_hub': 1 if destination in HUB_AIRPORTS else 0,
-        'distance': estimate_distance(origin, destination),
+        'distance': estimate_distance(origin, destination) if origin_known and dest_known else 250,
     }
 
     # Add weather features
