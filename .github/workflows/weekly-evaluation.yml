@@ -1,0 +1,26 @@
+name: Weekly Evaluation
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9 AM UTC
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run evaluation
+        run: python weekly_evaluation.py --days 7
+      - name: Commit results
+        run: |
+          git config user.name "FlyRely Bot"
+          git config user.email "bot@flyrely.com"
+          git add evaluation_results_*.csv evaluation_summary_*.txt
+          git commit -m "chore: weekly evaluation results" || true
+          git push
