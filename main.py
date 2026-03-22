@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 # Paths
 REPO_ROOT = Path(__file__).parent.parent.parent  # Navigate up to repo root
 PREDICTIONS_CSV = REPO_ROOT / "predictions.csv"
-MODEL_PATH = Path(__file__).parent / "models" / "flight_delay_model_v2_weather.joblib"
-SCALER_PATH = Path(__file__).parent / "models" / "scaler.joblib"
-MODEL_VERSION = "v2_weather"  # v2 with weather features
+MODEL_PATH = Path(__file__).parent / "models" / "flight_delay_model.joblib"
+SCALER_PATH = Path(__file__).parent / "models" / "feature_names.joblib"
+MODEL_VERSION = "v1.1_with_weather_api"  # baseline model with weather API integration
 
 # API Keys from environment
 TOMORROW_IO_KEY = os.getenv("TOMORROW_IO_API_KEY", "")
