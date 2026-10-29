@@ -30,3 +30,7 @@ htmlcov/
 usage_log.jsonl
 predictions.csv
 data/
+
+# Backtest artifacts
+backtest/results/*.joblib
+backtest/results/*_quick.json
