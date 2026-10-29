@@ -1,0 +1,1209 @@
+{
+  "protocol": "backtest/PROTOCOL_RUNUP.md",
+  "quick_debug_run": false,
+  "periods": {
+    "fit": {
+      "rows": [
+        "2025-01",
+        "2025-06"
+      ],
+      "rates": [
+        "2024-01",
+        "2024-12"
+      ]
+    },
+    "val": {
+      "rows": [
+        "2025-07",
+        "2025-12"
+      ],
+      "rates": [
+        "2024-07",
+        "2025-06"
+      ]
+    },
+    "holdout": {
+      "rows": [
+        "2026-01",
+        "2026-08"
+      ],
+      "rates": [
+        "2025-01",
+        "2025-12"
+      ]
+    }
+  },
+  "weather_airports": 54,
+  "booking": {
+    "flyrely": {
+      "auc_delayed": 0.6818,
+      "brier_delayed": 0.17111,
+      "ece": 0.0449,
+      "max_decile_gap": 0.0717,
+      "auc_disrupted": 0.6726,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.06,
+          "observed": 0.0727
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.0913,
+          "observed": 0.1137
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.1173,
+          "observed": 0.1471
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1403,
+          "observed": 0.1766
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.1661,
+          "observed": 0.2114
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.1921,
+          "observed": 0.2454
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.222,
+          "observed": 0.2758
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2603,
+          "observed": 0.318
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.3066,
+          "observed": 0.3731
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.394,
+          "observed": 0.4657
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.6182,
+        "2026-02": 0.643,
+        "2026-03": 0.6629,
+        "2026-04": 0.6631,
+        "2026-05": 0.6849,
+        "2026-06": 0.7069,
+        "2026-07": 0.7023,
+        "2026-08": 0.702
+      }
+    },
+    "flighty_proxy": {
+      "auc_delayed": 0.5967,
+      "brier_delayed": 0.17902,
+      "ece": 0.0159,
+      "max_decile_gap": 0.0581,
+      "auc_disrupted": 0.5922,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.1337,
+          "observed": 0.1342
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.1712,
+          "observed": 0.1735
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.1924,
+          "observed": 0.1941
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.2088,
+          "observed": 0.2159
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.2221,
+          "observed": 0.2278
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.2342,
+          "observed": 0.2445
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.2442,
+          "observed": 0.2695
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.261,
+          "observed": 0.2822
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.2748,
+          "observed": 0.3018
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.2979,
+          "observed": 0.356
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.5591,
+        "2026-02": 0.5831,
+        "2026-03": 0.5812,
+        "2026-04": 0.5776,
+        "2026-05": 0.5902,
+        "2026-06": 0.6046,
+        "2026-07": 0.6365,
+        "2026-08": 0.6119
+      }
+    },
+    "brier_flyrely_minus_proxy": {
+      "diff": -0.007905,
+      "ci95": [
+        -0.009218,
+        -0.006577
+      ]
+    }
+  },
+  "7d": {
+    "weather_used": true,
+    "validation_brier": {
+      "False": 0.16037,
+      "True": 0.159758
+    },
+    "features": [
+      "dep_hour",
+      "dow",
+      "month",
+      "Distance",
+      "CRSElapsedTime",
+      "days_to_holiday",
+      "rate_Origin_delayed",
+      "rate_Dest_delayed",
+      "rate_Origin_Dest_delayed",
+      "rate_Reporting_Airline_delayed",
+      "rate_Reporting_Airline_Origin_delayed",
+      "rate_Origin_dep_hour_delayed",
+      "rate_Reporting_Airline_dep_hour_delayed",
+      "rate_Origin_month_delayed",
+      "rate_Reporting_Airline_Origin_Dest_dep_hour_delayed",
+      "rate_Origin_c",
+      "rate_Reporting_Airline_c",
+      "rate_Origin_month_c",
+      "Origin_daily_flights",
+      "Dest_daily_flights",
+      "r7_o_delay_rate",
+      "r7_o_cancel_rate",
+      "r7_o_flights",
+      "r7_d_delay_rate",
+      "r7_d_cancel_rate",
+      "r7_d_flights",
+      "r7_al_delay_rate",
+      "r7_al_cancel_rate",
+      "r7_al_flights",
+      "r7_rt_delay_rate",
+      "r7_rt_cancel_rate",
+      "r7_rt_flights",
+      "r7_fn_delay_rate",
+      "r7_fn_cancel_rate",
+      "r7_fn_flights",
+      "wx_o_precipitation",
+      "wx_o_snowfall",
+      "wx_o_wind_gusts_10m",
+      "wx_o_cape",
+      "wx_o_weather_code",
+      "wx_d_precipitation",
+      "wx_d_snowfall",
+      "wx_d_wind_gusts_10m",
+      "wx_d_cape",
+      "wx_d_weather_code"
+    ],
+    "flyrely": {
+      "auc_delayed": 0.6927,
+      "brier_delayed": 0.16758,
+      "ece": 0.0278,
+      "max_decile_gap": 0.0429,
+      "auc_disrupted": 0.6845,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.0608,
+          "observed": 0.0717
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.0915,
+          "observed": 0.1059
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.1197,
+          "observed": 0.1393
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1477,
+          "observed": 0.1727
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.176,
+          "observed": 0.2054
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.2064,
+          "observed": 0.2412
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.2404,
+          "observed": 0.2749
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2831,
+          "observed": 0.3161
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.3439,
+          "observed": 0.378
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.4515,
+          "observed": 0.4944
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.6362,
+        "2026-02": 0.6615,
+        "2026-03": 0.6764,
+        "2026-04": 0.6751,
+        "2026-05": 0.6978,
+        "2026-06": 0.7186,
+        "2026-07": 0.7153,
+        "2026-08": 0.7123
+      }
+    },
+    "flighty_proxy": {
+      "auc_delayed": 0.6289,
+      "brier_delayed": 0.17571,
+      "ece": 0.0131,
+      "max_decile_gap": 0.0502,
+      "auc_disrupted": 0.6233,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.1153,
+          "observed": 0.1136
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.1543,
+          "observed": 0.1521
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.179,
+          "observed": 0.1786
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1978,
+          "observed": 0.2013
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.2168,
+          "observed": 0.2217
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.235,
+          "observed": 0.2407
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.2519,
+          "observed": 0.2641
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2715,
+          "observed": 0.2924
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.2982,
+          "observed": 0.3269
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.3579,
+          "observed": 0.4081
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.5766,
+        "2026-02": 0.6035,
+        "2026-03": 0.6034,
+        "2026-04": 0.6046,
+        "2026-05": 0.6401,
+        "2026-06": 0.641,
+        "2026-07": 0.6774,
+        "2026-08": 0.6305
+      }
+    },
+    "brier_flyrely_minus_proxy": {
+      "diff": -0.008137,
+      "ci95": [
+        -0.009313,
+        -0.006896
+      ]
+    },
+    "brier_flyrely_minus_booking": {
+      "diff": -0.003537,
+      "ci95": [
+        -0.004116,
+        -0.003008
+      ]
+    },
+    "checks": {
+      "1_brier_beats_proxy_ci_below_zero": true,
+      "2_auc_beats_proxy": true,
+      "3_ece_le_0.02": false,
+      "4_brier_beats_booking": true
+    },
+    "beats_flighty_proxy": false
+  },
+  "1d": {
+    "weather_used": true,
+    "validation_brier": {
+      "False": 0.159527,
+      "True": 0.157236
+    },
+    "features": [
+      "dep_hour",
+      "dow",
+      "month",
+      "Distance",
+      "CRSElapsedTime",
+      "days_to_holiday",
+      "rate_Origin_delayed",
+      "rate_Dest_delayed",
+      "rate_Origin_Dest_delayed",
+      "rate_Reporting_Airline_delayed",
+      "rate_Reporting_Airline_Origin_delayed",
+      "rate_Origin_dep_hour_delayed",
+      "rate_Reporting_Airline_dep_hour_delayed",
+      "rate_Origin_month_delayed",
+      "rate_Reporting_Airline_Origin_Dest_dep_hour_delayed",
+      "rate_Origin_c",
+      "rate_Reporting_Airline_c",
+      "rate_Origin_month_c",
+      "Origin_daily_flights",
+      "Dest_daily_flights",
+      "r7_o_delay_rate",
+      "r7_o_cancel_rate",
+      "r7_o_flights",
+      "r7_d_delay_rate",
+      "r7_d_cancel_rate",
+      "r7_d_flights",
+      "r7_al_delay_rate",
+      "r7_al_cancel_rate",
+      "r7_al_flights",
+      "r7_rt_delay_rate",
+      "r7_rt_cancel_rate",
+      "r7_rt_flights",
+      "r7_fn_delay_rate",
+      "r7_fn_cancel_rate",
+      "r7_fn_flights",
+      "wx_o_precipitation",
+      "wx_o_snowfall",
+      "wx_o_wind_gusts_10m",
+      "wx_o_cape",
+      "wx_o_weather_code",
+      "wx_d_precipitation",
+      "wx_d_snowfall",
+      "wx_d_wind_gusts_10m",
+      "wx_d_cape",
+      "wx_d_weather_code"
+    ],
+    "flyrely": {
+      "auc_delayed": 0.7015,
+      "brier_delayed": 0.16547,
+      "ece": 0.02,
+      "max_decile_gap": 0.0291,
+      "auc_disrupted": 0.6978,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.0602,
+          "observed": 0.0697
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.0891,
+          "observed": 0.104
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.1179,
+          "observed": 0.1352
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1466,
+          "observed": 0.1641
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.1761,
+          "observed": 0.1968
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.2087,
+          "observed": 0.2356
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.2478,
+          "observed": 0.2752
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2931,
+          "observed": 0.3222
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.3657,
+          "observed": 0.3873
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.4946,
+          "observed": 0.5094
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.6369,
+        "2026-02": 0.6716,
+        "2026-03": 0.6873,
+        "2026-04": 0.6853,
+        "2026-05": 0.7028,
+        "2026-06": 0.7245,
+        "2026-07": 0.7222,
+        "2026-08": 0.7234
+      }
+    },
+    "flighty_proxy": {
+      "auc_delayed": 0.6427,
+      "brier_delayed": 0.17399,
+      "ece": 0.0125,
+      "max_decile_gap": 0.048,
+      "auc_disrupted": 0.6366,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.1071,
+          "observed": 0.1048
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.1466,
+          "observed": 0.1435
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.173,
+          "observed": 0.1715
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1951,
+          "observed": 0.1924
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.2147,
+          "observed": 0.2188
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.2346,
+          "observed": 0.2392
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.2546,
+          "observed": 0.2682
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2763,
+          "observed": 0.2941
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.3093,
+          "observed": 0.3363
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.3828,
+          "observed": 0.4308
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.5932,
+        "2026-02": 0.6176,
+        "2026-03": 0.6176,
+        "2026-04": 0.6185,
+        "2026-05": 0.6541,
+        "2026-06": 0.6566,
+        "2026-07": 0.6865,
+        "2026-08": 0.6422
+      }
+    },
+    "brier_flyrely_minus_proxy": {
+      "diff": -0.008521,
+      "ci95": [
+        -0.009884,
+        -0.00717
+      ]
+    },
+    "brier_flyrely_minus_booking": {
+      "diff": -0.005641,
+      "ci95": [
+        -0.006453,
+        -0.004839
+      ]
+    },
+    "checks": {
+      "1_brier_beats_proxy_ci_below_zero": true,
+      "2_auc_beats_proxy": true,
+      "3_ece_le_0.02": true,
+      "4_brier_beats_booking": true
+    },
+    "beats_flighty_proxy": true
+  },
+  "3h": {
+    "weather_used": true,
+    "validation_brier": {
+      "False": 0.119428,
+      "True": 0.118512
+    },
+    "features": [
+      "dep_hour",
+      "dow",
+      "month",
+      "Distance",
+      "CRSElapsedTime",
+      "days_to_holiday",
+      "rate_Origin_delayed",
+      "rate_Dest_delayed",
+      "rate_Origin_Dest_delayed",
+      "rate_Reporting_Airline_delayed",
+      "rate_Reporting_Airline_Origin_delayed",
+      "rate_Origin_dep_hour_delayed",
+      "rate_Reporting_Airline_dep_hour_delayed",
+      "rate_Origin_month_delayed",
+      "rate_Reporting_Airline_Origin_Dest_dep_hour_delayed",
+      "rate_Origin_c",
+      "rate_Reporting_Airline_c",
+      "rate_Origin_month_c",
+      "Origin_daily_flights",
+      "Dest_daily_flights",
+      "r7_o_delay_rate",
+      "r7_o_cancel_rate",
+      "r7_o_flights",
+      "r7_d_delay_rate",
+      "r7_d_cancel_rate",
+      "r7_d_flights",
+      "r7_al_delay_rate",
+      "r7_al_cancel_rate",
+      "r7_al_flights",
+      "r7_rt_delay_rate",
+      "r7_rt_cancel_rate",
+      "r7_rt_flights",
+      "r7_fn_delay_rate",
+      "r7_fn_cancel_rate",
+      "r7_fn_flights",
+      "o_120m_delayed_share",
+      "o_120m_mean_late",
+      "o_120m_departed",
+      "o_480m_delayed_share",
+      "o_480m_mean_late",
+      "o_480m_departed",
+      "o_480m_cancelled",
+      "o_pending",
+      "o_pending_mean_wait",
+      "d_120m_delayed_share",
+      "d_120m_mean_late",
+      "d_120m_departed",
+      "d_480m_delayed_share",
+      "d_480m_mean_late",
+      "d_480m_departed",
+      "d_480m_cancelled",
+      "d_pending",
+      "d_pending_mean_wait",
+      "al_120m_delayed_share",
+      "al_120m_mean_late",
+      "al_120m_departed",
+      "al_480m_delayed_share",
+      "al_480m_mean_late",
+      "al_480m_departed",
+      "al_480m_cancelled",
+      "al_pending",
+      "al_pending_mean_wait",
+      "rot_has_leg",
+      "rot_known_delay",
+      "rot_leg_pending",
+      "rot_leg_cancelled",
+      "rot_legs_between",
+      "rot_slack",
+      "rot_projected_delay",
+      "rot_minutes_since_leg_sched",
+      "rot_sched_turn",
+      "wx_o_precipitation",
+      "wx_o_snowfall",
+      "wx_o_wind_gusts_10m",
+      "wx_o_cape",
+      "wx_o_weather_code",
+      "wx_d_precipitation",
+      "wx_d_snowfall",
+      "wx_d_wind_gusts_10m",
+      "wx_d_cape",
+      "wx_d_weather_code"
+    ],
+    "flyrely": {
+      "auc_delayed": 0.821,
+      "brier_delayed": 0.12447,
+      "ece": 0.0038,
+      "max_decile_gap": 0.0132,
+      "auc_disrupted": 0.825,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.045,
+          "observed": 0.0437
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.0643,
+          "observed": 0.0625
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.0811,
+          "observed": 0.0798
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1019,
+          "observed": 0.0993
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.1285,
+          "observed": 0.1258
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.1621,
+          "observed": 0.1601
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.2133,
+          "observed": 0.2128
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.3013,
+          "observed": 0.3003
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.4844,
+          "observed": 0.4712
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.8561,
+          "observed": 0.8442
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.8104,
+        "2026-02": 0.8027,
+        "2026-03": 0.8221,
+        "2026-04": 0.8094,
+        "2026-05": 0.8163,
+        "2026-06": 0.8304,
+        "2026-07": 0.8238,
+        "2026-08": 0.8253
+      }
+    },
+    "flighty_proxy": {
+      "auc_delayed": 0.7502,
+      "brier_delayed": 0.14064,
+      "ece": 0.0076,
+      "max_decile_gap": 0.0218,
+      "auc_disrupted": 0.7431,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.0827,
+          "observed": 0.0828
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.1094,
+          "observed": 0.1079
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.1257,
+          "observed": 0.1266
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1409,
+          "observed": 0.1419
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.155,
+          "observed": 0.1603
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.1699,
+          "observed": 0.176
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.1892,
+          "observed": 0.2012
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2199,
+          "observed": 0.2379
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.37,
+          "observed": 0.3796
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.8072,
+          "observed": 0.7854
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.7125,
+        "2026-02": 0.731,
+        "2026-03": 0.7379,
+        "2026-04": 0.7409,
+        "2026-05": 0.7554,
+        "2026-06": 0.7653,
+        "2026-07": 0.7734,
+        "2026-08": 0.751
+      }
+    },
+    "brier_flyrely_minus_proxy": {
+      "diff": -0.016172,
+      "ci95": [
+        -0.017257,
+        -0.015152
+      ]
+    },
+    "brier_flyrely_minus_booking": {
+      "diff": -0.046645,
+      "ci95": [
+        -0.049081,
+        -0.044413
+      ]
+    },
+    "checks": {
+      "1_brier_beats_proxy_ci_below_zero": true,
+      "2_auc_beats_proxy": true,
+      "3_ece_le_0.02": true,
+      "4_brier_beats_booking": true
+    },
+    "beats_flighty_proxy": true
+  },
+  "1h": {
+    "weather_used": true,
+    "validation_brier": {
+      "False": 0.103201,
+      "True": 0.102903
+    },
+    "features": [
+      "dep_hour",
+      "dow",
+      "month",
+      "Distance",
+      "CRSElapsedTime",
+      "days_to_holiday",
+      "rate_Origin_delayed",
+      "rate_Dest_delayed",
+      "rate_Origin_Dest_delayed",
+      "rate_Reporting_Airline_delayed",
+      "rate_Reporting_Airline_Origin_delayed",
+      "rate_Origin_dep_hour_delayed",
+      "rate_Reporting_Airline_dep_hour_delayed",
+      "rate_Origin_month_delayed",
+      "rate_Reporting_Airline_Origin_Dest_dep_hour_delayed",
+      "rate_Origin_c",
+      "rate_Reporting_Airline_c",
+      "rate_Origin_month_c",
+      "Origin_daily_flights",
+      "Dest_daily_flights",
+      "r7_o_delay_rate",
+      "r7_o_cancel_rate",
+      "r7_o_flights",
+      "r7_d_delay_rate",
+      "r7_d_cancel_rate",
+      "r7_d_flights",
+      "r7_al_delay_rate",
+      "r7_al_cancel_rate",
+      "r7_al_flights",
+      "r7_rt_delay_rate",
+      "r7_rt_cancel_rate",
+      "r7_rt_flights",
+      "r7_fn_delay_rate",
+      "r7_fn_cancel_rate",
+      "r7_fn_flights",
+      "o_120m_delayed_share",
+      "o_120m_mean_late",
+      "o_120m_departed",
+      "o_480m_delayed_share",
+      "o_480m_mean_late",
+      "o_480m_departed",
+      "o_480m_cancelled",
+      "o_pending",
+      "o_pending_mean_wait",
+      "d_120m_delayed_share",
+      "d_120m_mean_late",
+      "d_120m_departed",
+      "d_480m_delayed_share",
+      "d_480m_mean_late",
+      "d_480m_departed",
+      "d_480m_cancelled",
+      "d_pending",
+      "d_pending_mean_wait",
+      "al_120m_delayed_share",
+      "al_120m_mean_late",
+      "al_120m_departed",
+      "al_480m_delayed_share",
+      "al_480m_mean_late",
+      "al_480m_departed",
+      "al_480m_cancelled",
+      "al_pending",
+      "al_pending_mean_wait",
+      "rot_has_leg",
+      "rot_known_delay",
+      "rot_leg_pending",
+      "rot_leg_cancelled",
+      "rot_legs_between",
+      "rot_slack",
+      "rot_projected_delay",
+      "rot_minutes_since_leg_sched",
+      "rot_sched_turn",
+      "wx_o_precipitation",
+      "wx_o_snowfall",
+      "wx_o_wind_gusts_10m",
+      "wx_o_cape",
+      "wx_o_weather_code",
+      "wx_d_precipitation",
+      "wx_d_snowfall",
+      "wx_d_wind_gusts_10m",
+      "wx_d_cape",
+      "wx_d_weather_code"
+    ],
+    "flyrely": {
+      "auc_delayed": 0.8534,
+      "brier_delayed": 0.10852,
+      "ece": 0.0059,
+      "max_decile_gap": 0.0193,
+      "auc_disrupted": 0.8567,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.0375,
+          "observed": 0.0364
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.0546,
+          "observed": 0.0525
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.0691,
+          "observed": 0.0667
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.0867,
+          "observed": 0.0827
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.1104,
+          "observed": 0.1051
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.1424,
+          "observed": 0.1372
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.1937,
+          "observed": 0.1885
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.291,
+          "observed": 0.2848
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.5325,
+          "observed": 0.5132
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.9408,
+          "observed": 0.9325
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.8428,
+        "2026-02": 0.8357,
+        "2026-03": 0.8524,
+        "2026-04": 0.8445,
+        "2026-05": 0.8509,
+        "2026-06": 0.8624,
+        "2026-07": 0.8577,
+        "2026-08": 0.8578
+      }
+    },
+    "flighty_proxy": {
+      "auc_delayed": 0.7874,
+      "brier_delayed": 0.12429,
+      "ece": 0.0076,
+      "max_decile_gap": 0.0218,
+      "auc_disrupted": 0.7778,
+      "deciles": [
+        {
+          "decile": 1,
+          "n": 462481,
+          "predicted": 0.0719,
+          "observed": 0.0738
+        },
+        {
+          "decile": 2,
+          "n": 462481,
+          "predicted": 0.0938,
+          "observed": 0.0945
+        },
+        {
+          "decile": 3,
+          "n": 462481,
+          "predicted": 0.1074,
+          "observed": 0.1097
+        },
+        {
+          "decile": 4,
+          "n": 462481,
+          "predicted": 0.1209,
+          "observed": 0.1241
+        },
+        {
+          "decile": 5,
+          "n": 462481,
+          "predicted": 0.1331,
+          "observed": 0.1376
+        },
+        {
+          "decile": 6,
+          "n": 462481,
+          "predicted": 0.1464,
+          "observed": 0.1553
+        },
+        {
+          "decile": 7,
+          "n": 462481,
+          "predicted": 0.1661,
+          "observed": 0.1761
+        },
+        {
+          "decile": 8,
+          "n": 462480,
+          "predicted": 0.2041,
+          "observed": 0.2211
+        },
+        {
+          "decile": 9,
+          "n": 462480,
+          "predicted": 0.417,
+          "observed": 0.4113
+        },
+        {
+          "decile": 10,
+          "n": 462480,
+          "predicted": 0.9178,
+          "observed": 0.896
+        }
+      ],
+      "monthly_auc": {
+        "2026-01": 0.7509,
+        "2026-02": 0.7704,
+        "2026-03": 0.7746,
+        "2026-04": 0.7828,
+        "2026-05": 0.7928,
+        "2026-06": 0.8011,
+        "2026-07": 0.8069,
+        "2026-08": 0.7896
+      }
+    },
+    "brier_flyrely_minus_proxy": {
+      "diff": -0.015762,
+      "ci95": [
+        -0.016826,
+        -0.014785
+      ]
+    },
+    "brier_flyrely_minus_booking": {
+      "diff": -0.06259,
+      "ci95": [
+        -0.065206,
+        -0.060069
+      ]
+    },
+    "checks": {
+      "1_brier_beats_proxy_ci_below_zero": true,
+      "2_auc_beats_proxy": true,
+      "3_ece_le_0.02": true,
+      "4_brier_beats_booking": true
+    },
+    "beats_flighty_proxy": true
+  },
+  "auc_non_decreasing_toward_departure": true
+}
