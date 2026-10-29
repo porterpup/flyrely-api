@@ -6,13 +6,17 @@ Demonstrates how to use the FlyRely prediction API.
 
 Usage:
     pip install httpx
-    python example_client.py
+    FLYRELY_API_URL=http://localhost:8000 python example_client.py
+
+Exits non-zero if the API is unreachable or any prediction fails.
 """
 
+import os
+import sys
 import httpx
 from datetime import datetime, timedelta
 
-API_URL = "http://localhost:8000"
+API_URL = os.environ.get("FLYRELY_API_URL", "http://localhost:8000")
 
 
 def predict_flight(origin: str, destination: str, departure_time: datetime, airline: str = None):
@@ -47,6 +51,13 @@ def print_prediction(result: dict):
     print(f"   Delay Probability: {result['delay_probability']*100:.0f}%")
     print(f"   Confidence: {result['confidence']*100:.0f}%")
 
+    sev = result.get('delay_severity')
+    if sev:
+        print(f"   If delayed: {sev['minor_pct']*100:.0f}% minor / {sev['moderate_pct']*100:.0f}% moderate / "
+              f"{sev['severe_pct']*100:.0f}% severe (most likely {sev['expected_delay_range']})")
+    if not result.get('weather_available'):
+        print("   (weather unavailable — risk factors exclude weather)")
+
     # Weather
     if result.get('origin_weather'):
         w = result['origin_weather']
@@ -72,6 +83,9 @@ def print_prediction(result: dict):
         for rec in result['recommendations']:
             print(f"   • {rec}")
 
+    for w in result.get('warnings', []):
+        print(f"   ⚠ {w}")
+
     print()
 
 
@@ -89,7 +103,7 @@ def main():
         print(f"✗ Cannot connect to API at {API_URL}")
         print(f"  Error: {e}")
         print("\nMake sure the API is running: uvicorn main:app --reload")
-        return
+        sys.exit(1)
 
     # Example predictions
     examples = [
@@ -119,12 +133,16 @@ def main():
     print("\n" + "-" * 60)
     print("Running example predictions...")
 
+    failures = 0
     for ex in examples:
         try:
             result = predict_flight(**ex)
             print_prediction(result)
         except Exception as e:
+            failures += 1
             print(f"Error: {e}")
+
+    sys.exit(1 if failures else 0)
 
 
 if __name__ == "__main__":

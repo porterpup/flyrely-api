@@ -25,3 +25,8 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Runtime data
+usage_log.jsonl
+predictions.csv
+data/
