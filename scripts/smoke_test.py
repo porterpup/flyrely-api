@@ -1,18 +1,55 @@
-import requests, os, sys
-API = os.environ.get('FLYRELY_API_URL','https://web-production-ea1e9.up.railway.app')
+"""Contract smoke test against a running FlyRely API.
 
-print('API:', API)
-try:
-    r = requests.get(f'{API}/health', timeout=10)
-    print('/health', r.status_code, r.json())
+    FLYRELY_API_URL=http://localhost:8000 python scripts/smoke_test.py
 
-    payload = {"origin":"JFK","destination":"LAX","departure_time":"2026-03-15T14:30:00","airline":"AA"}
-    p = requests.post(f'{API}/predict', json=payload, timeout=15)
-    print('/predict', p.status_code)
+Exits non-zero if /health or /predict does not honour the canonical contract.
+"""
+import json
+import os
+import sys
+import urllib.request
+
+API = os.environ.get('FLYRELY_API_URL', 'http://localhost:8000').rstrip('/')
+
+PREDICT_FIELDS = {
+    'flight_id', 'risk_level', 'delay_probability', 'confidence', 'delay_severity',
+    'origin', 'destination', 'departure_time', 'airline', 'weather_available',
+    'origin_weather', 'destination_weather', 'risk_factors', 'recommendations',
+    'warnings', 'model_version',
+}
+
+
+def call(path, payload=None):
+    req = urllib.request.Request(
+        f'{API}{path}',
+        data=json.dumps(payload).encode() if payload is not None else None,
+        headers={'Content-Type': 'application/json'},
+    )
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return r.status, json.loads(r.read())
+
+
+def main():
+    print('API:', API)
+    status, health = call('/health')
+    print('/health', status, health)
+    if health.get('status') != 'healthy':
+        sys.exit('health is not healthy')
+
+    payload = {'flight_id': 'smoke-1', 'origin': 'JFK', 'destination': 'LAX',
+               'departure_time': '2026-11-15T14:30:00', 'airline': 'AA'}
+    status, body = call('/predict', payload)
+    print('/predict', status, json.dumps(body, indent=2))
+    missing = PREDICT_FIELDS - body.keys()
+    if missing:
+        sys.exit(f'missing fields: {sorted(missing)}')
+    if body['flight_id'] != 'smoke-1':
+        sys.exit('flight_id not echoed')
+    print('OK')
+
+
+if __name__ == '__main__':
     try:
-        print(p.json())
+        main()
     except Exception as e:
-        print('predict non-json or error', e)
-except Exception as e:
-    print('smoke test failed', e)
-    sys.exit(2)
+        sys.exit(f'smoke test failed: {e}')
