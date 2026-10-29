@@ -21,7 +21,8 @@ CANONICAL_REQUEST = {
 # Every field the frontend's PredictResponse type declares (src/lib/api.ts)
 CANONICAL_FIELDS = {
     "flight_id", "risk_level", "delay_probability", "confidence", "delay_severity",
-    "origin", "destination", "departure_time", "airline", "weather_available",
+    "origin", "destination", "departure_time", "airline", "flight_number", "operating_airline",
+    "operating_airline_name", "operating_flight_number", "weather_available",
     "origin_weather", "destination_weather", "risk_factors", "recommendations",
     "warnings", "model_version",
 }
@@ -82,6 +83,32 @@ def test_predict_accepts_utc_suffix():
     r = client.post("/predict", json={**CANONICAL_REQUEST, "departure_time": "2026-11-15T18:30:00Z"})
     assert r.status_code == 200, r.text
     assert r.json()["departure_time"] == "2026-11-15T18:30:00"
+
+
+def test_codeshare_is_modelled_as_operator_but_shown_as_ticketing_airline(monkeypatch):
+    seen = {}
+    real = main.build_features
+    monkeypatch.setattr(main, "build_features", lambda o, d, t, a: seen.setdefault("airline", a) and real(o, d, t, a))
+    req = {**CANONICAL_REQUEST, "origin": "DTW", "destination": "GRR", "airline": "DL", "flight_number": "DL3500"}
+    r = client.post("/predict", json=req)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert seen["airline"] == "OO"
+    assert (body["airline"], body["flight_number"]) == ("DL", "3500")
+    assert (body["operating_airline"], body["operating_airline_name"]) == ("OO", "SkyWest Airlines")
+
+
+def test_codeshare_operator_without_history_falls_back_to_ticketing_airline():
+    req = {**CANONICAL_REQUEST, "origin": "FWA", "destination": "ATL", "airline": "DL", "flight_number": "4632"}
+    body = client.post("/predict", json=req).json()
+    assert body["operating_airline"] == "9E"
+    assert any("Endeavor" in w for w in body["warnings"])
+
+
+def test_mainline_flight_has_itself_as_operator():
+    body = client.post("/predict", json={**CANONICAL_REQUEST, "airline": "AA", "flight_number": "1"}).json()
+    assert body["operating_airline"] == "AA"
+    assert not body["warnings"]
 
 
 def test_unknown_airport_is_flagged():

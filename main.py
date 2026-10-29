@@ -43,6 +43,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+import codeshare
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -101,10 +103,12 @@ AIRPORT_DELAY_RATES = {
     "PDX": 0.19, "BWI": 0.20, "FLL": 0.21, "MDW": 0.22, "BNA": 0.20, "AUS": 0.19,
 }
 
-# Historical delay rates by airline
+# Historical delay rates by operating airline
 AIRLINE_DELAY_RATES = {
     "AA": 0.21, "DL": 0.18, "UA": 0.22, "WN": 0.23, "AS": 0.17, "B6": 0.24,
     "NK": 0.28, "F9": 0.27, "G4": 0.26, "HA": 0.16, "SY": 0.25,
+    # Regional operators flying for the majors (BTS 2025, departures delayed 15+ min)
+    "OO": 0.185, "YX": 0.18, "MQ": 0.184, "OH": 0.256,
 }
 
 # Hub airports
@@ -176,7 +180,9 @@ class FlightRequest(BaseModel):
     origin: str = Field(..., description="Origin airport code (e.g., 'JFK')", min_length=3, max_length=3)
     destination: str = Field(..., description="Destination airport code (e.g., 'LAX')", min_length=3, max_length=3)
     departure_time: datetime = Field(..., description="Scheduled local departure time (ISO, no offset)")
-    airline: Optional[str] = Field(None, description="Airline code (e.g., 'AA', 'DL', 'UA')")
+    airline: Optional[str] = Field(None, description="Ticketing airline code (e.g., 'AA', 'DL', 'UA')")
+    flight_number: Optional[str] = Field(None, description="Ticketed flight number, e.g. '1234' or 'DL1234'; "
+                                                           "used to find the operating carrier")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -221,6 +227,11 @@ class PredictionResponse(BaseModel):
     destination: str
     departure_time: str
     airline: Optional[str]
+    flight_number: Optional[str] = None
+    # Who actually flies it (e.g. SkyWest for a Delta ticket); the prediction is made for this carrier
+    operating_airline: Optional[str] = None
+    operating_airline_name: Optional[str] = None
+    operating_flight_number: Optional[str] = None
 
     # Weather is not a model input; it only feeds risk_factors
     weather_available: bool
@@ -692,16 +703,26 @@ async def predict_delay(request: FlightRequest):
     destination = request.destination.upper()
     # Scheduled times are local wall-clock (as in BTS); drop any offset
     dep_time = request.departure_time.replace(tzinfo=None)
-    airline = request.airline.upper() if request.airline else None
+    airline, flight_number = codeshare.parse_flight(
+        request.airline.upper() if request.airline else None, request.flight_number)
+
+    # Predict for the carrier that flies the plane; the customer still sees the airline they booked
+    operator = codeshare.resolve(airline, flight_number, origin, destination)
+    model_airline = airline
+    if operator and operator["operating_airline"] in AIRLINE_DELAY_RATES:
+        model_airline = operator["operating_airline"]
 
     warnings = []
     for label, code in (("Origin", origin), ("Destination", destination)):
         if code not in AIRPORT_COORDS:
             warnings.append(f"{label} airport {code} is not in FlyRely's historical data; using defaults")
-    if airline and airline not in AIRLINE_DELAY_RATES:
-        warnings.append(f"Airline {airline} is not in FlyRely's historical data; using defaults")
+    if model_airline and model_airline not in AIRLINE_DELAY_RATES:
+        warnings.append(f"Airline {model_airline} is not in FlyRely's historical data; using defaults")
+    if operator and model_airline != operator["operating_airline"]:
+        warnings.append(f"No history for operator {operator['operating_airline_name']}; "
+                        f"using {airline}'s delay rate")
 
-    features = build_features(origin, destination, dep_time, airline)
+    features = build_features(origin, destination, dep_time, model_airline)
 
     start = time.perf_counter()
     try:
@@ -743,6 +764,10 @@ async def predict_delay(request: FlightRequest):
         destination=destination,
         departure_time=dep_time.isoformat(),
         airline=airline,
+        flight_number=flight_number,
+        operating_airline=operator["operating_airline"] if operator else None,
+        operating_airline_name=operator["operating_airline_name"] if operator else None,
+        operating_flight_number=operator["operating_flight_number"] if operator else None,
         weather_available=weather_origin is not None and weather_dest is not None,
         origin_weather=WeatherData(**weather_origin) if weather_origin else None,
         destination_weather=WeatherData(**weather_dest) if weather_dest else None,
