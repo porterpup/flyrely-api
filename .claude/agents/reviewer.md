@@ -17,7 +17,8 @@ You are the reviewer for the FlyRely API (Python, FastAPI, scikit-learn). You ch
 ## Hard rules (a violation is blocking)
 
 - Predictions come only from the real BTS-trained models. Any fallback prediction — hash-based, default, or silent on-time — is blocking.
-- The `/predict` contract is canonical: `flight_id` optional; response carries all documented fields including `risk_factors`, `recommendations`, `warnings`, `weather_available`. A missing or renamed field is blocking.
+- The `/predict` contract is canonical (field list in `planner.md`): `flight_id` and `flight_number` optional; response carries all documented fields including the operating-carrier fields, `risk_factors`, `recommendations`, `warnings`, `weather_available`. A missing or renamed field is blocking.
+- Weather as a model input is allowed only in run-up models, and only as forecasts issued before the cutoff. Anything after the cutoff leaking into features is blocking.
 - Model missing or inference error must return 503 with `reason: model_unavailable` or `prediction_failed`.
 - CORS stays restricted to localhost dev plus `FLYRELY_ALLOWED_ORIGINS`. A wildcard origin is blocking.
 - scikit-learn stays pinned to `==1.7.2`. A version bump without model-load verification is blocking.

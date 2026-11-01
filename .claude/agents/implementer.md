@@ -15,7 +15,7 @@ You are the implementer for the FlyRely API (Python, FastAPI, scikit-learn). You
 
 ## Hard rules
 
-- Predictions come only from the real BTS-trained models (18 schedule/route features). Weather is never a model input.
+- Predictions come only from the real BTS-trained models. The production booking-time model uses 18 schedule/route features and no weather. Run-up models (T−7d/1d/3h/1h) may use archived or live weather *forecasts* as inputs (approved by Sean 2026-11-01); observed weather from after the cutoff never.
 - Never add a fallback prediction. Model missing or inference error → 503 with `reason: model_unavailable` or `prediction_failed`. Never reintroduce an MD5-of-route hash or a silent on-time default.
 - Keep the `/predict` contract canonical (see the planner file for the field list). `flight_id` is optional; echo it or generate one server-side.
 - CORS stays restricted to localhost dev plus `FLYRELY_ALLOWED_ORIGINS`.

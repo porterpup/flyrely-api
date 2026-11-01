@@ -16,9 +16,10 @@ You are the planner for the FlyRely API (Python, FastAPI, scikit-learn). Your jo
 
 ## Hard rules (never plan around these)
 
-- Predictions come only from the real BTS-trained models (18 schedule/route features). Weather is never a model input; it only feeds human-readable risk factors.
+- Predictions come only from the real BTS-trained models. The production booking-time model uses 18 schedule/route features and no weather; there, weather only feeds human-readable risk factors. Run-up models (T−7d/1d/3h/1h) may use weather *forecasts* issued before the cutoff as inputs (approved by Sean 2026-11-01).
 - There is no fallback prediction. If a model is missing or inference fails, `/predict` returns 503 with `reason: model_unavailable` or `prediction_failed`. Never plan a hash-based, default, or silent on-time fallback.
-- The `/predict` contract is canonical: `flight_id` optional (echoed, or server-generated); the response carries `flight_id`, `risk_level`, `delay_probability`, `confidence`, `delay_severity`, origin/destination/departure_time/airline, `weather_available`, `risk_factors`, `recommendations`, `warnings`, `model_version`.
+- The `/predict` contract is canonical: `flight_id` and `flight_number` (ticketed, e.g. `DL1234`) optional; the response carries `flight_id`, `risk_level`, `delay_probability`, `confidence`, `delay_severity`, origin/destination/departure_time/airline, `flight_number`, `operating_airline`, `operating_airline_name`, `operating_flight_number`, `weather_available`, `risk_factors`, `recommendations`, `warnings`, `model_version`.
+- Codeshares: predict at the **operating** carrier (e.g. SkyWest), show the customer the **ticketing** airline (e.g. Delta). See `codeshare.py`.
 - CORS is restricted to localhost dev plus `FLYRELY_ALLOWED_ORIGINS`. Never open it to `*`.
 - scikit-learn is pinned to `==1.7.2` in `requirements.txt` to match the pickled models. Never bump it without verifying the models still load.
 - No new paid API spend (no AeroAPI) without Sean's word.
