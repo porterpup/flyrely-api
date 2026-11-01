@@ -52,6 +52,7 @@ AIRPORT_TZ = {code: tz for tz, codes in TZ.items() for code in codes.split()}
 SCHEMA = """
 create table if not exists flights (
   id integer primary key, carrier text, number text, origin text, dest text,
+  operating_carrier text, operating_number text,
   sched_dep_local text, tz text, added_utc text,
   actual_delay real, cancelled integer, outcome_source text
 );
@@ -97,7 +98,7 @@ def due(f, at: datetime) -> list[str]:
 
 def flyrely_predict(f) -> tuple[float, str]:
     body = {"flight_id": f"h2h-{f['id']}", "origin": f["origin"], "destination": f["dest"],
-            "departure_time": f["sched_dep_local"], "airline": f["carrier"]}
+            "departure_time": f["sched_dep_local"], "airline": f["carrier"], "flight_number": f["number"]}
     url = os.getenv("FLYRELY_API_URL")
     if url:
         import httpx
@@ -107,7 +108,8 @@ def flyrely_predict(f) -> tuple[float, str]:
         return j["delay_probability"], j.get("model_version", "")
     sys.path.insert(0, str(ROOT))
     import main
-    features = main.build_features(f["origin"], f["dest"], datetime.fromisoformat(f["sched_dep_local"]), f["carrier"])
+    airline = f["operating_carrier"] if f["operating_carrier"] in main.AIRLINE_DELAY_RATES else f["carrier"]
+    features = main.build_features(f["origin"], f["dest"], datetime.fromisoformat(f["sched_dep_local"]), airline)
     p, _ = main.model_service.predict(features)
     return float(p), f"{main.MODEL_VERSION} (in-process)"
 
@@ -124,13 +126,19 @@ def cmd_add(a):
     if not tz:
         sys.exit(f"don't know the time zone for {origin}; pass --tz (e.g. America/Chicago)")
     dep = datetime.fromisoformat(a.departure).replace(tzinfo=None)
+    sys.path.insert(0, str(ROOT))
+    import codeshare
+    op = codeshare.resolve(carrier, number, origin, dest) or {}
+    op_carrier, op_number = op.get("operating_airline", carrier), op.get("operating_flight_number", number)
     con = db()
-    cur = con.execute("insert into flights (carrier, number, origin, dest, sched_dep_local, tz, added_utc) "
-                      "values (?,?,?,?,?,?,?)", (carrier, number, origin, dest, dep.isoformat(), tz, now().isoformat()))
+    cur = con.execute("insert into flights (carrier, number, origin, dest, operating_carrier, operating_number, "
+                      "sched_dep_local, tz, added_utc) values (?,?,?,?,?,?,?,?,?)",
+                      (carrier, number, origin, dest, op_carrier, op_number, dep.isoformat(), tz, now().isoformat()))
     con.commit()
     fid = cur.lastrowid
     f = con.execute("select * from flights where id=?", (fid,)).fetchone()
-    print(f"added #{fid}: {carrier}{number} {origin}->{dest} {dep:%Y-%m-%d %H:%M} ({tz})")
+    operated = f", operated by {op['operating_airline_name']} {op_carrier}{op_number}" if op_carrier != carrier else ""
+    print(f"added #{fid}: {carrier}{number} {origin}->{dest} {dep:%Y-%m-%d %H:%M} ({tz}){operated}")
     snapshot_one(con, f, ["booking"])
     print(f"  now record what Flighty shows: h2h.py flighty {fid} booking --ontime <pct>")
     for cp in ("7d", "1d", "3h", "1h"):
@@ -201,12 +209,12 @@ def cmd_outcomes_from_bts(a):
         p = ROOT / "data" / "bts" / "parquet" / f"{dep:%Y-%m}.parquet"
         if not p.exists():
             continue
-        df = pd.read_parquet(p, columns=["FlightDate", "Reporting_Airline", "Marketing_Airline_Network",
-                                         "Flight_Number_Reporting_Airline", "Origin", "DepDelay", "Cancelled"])
+        # BTS reports by operating carrier, so match the operator's flight
+        df = pd.read_parquet(p, columns=["FlightDate", "Reporting_Airline", "Flight_Number_Reporting_Airline",
+                                         "Origin", "DepDelay", "Cancelled"])
         m = df[(df["FlightDate"] == pd.Timestamp(dep.date())) & (df["Origin"].astype(str) == f["origin"])
-               & (df["Flight_Number_Reporting_Airline"] == int(f["number"]))
-               & ((df["Reporting_Airline"].astype(str) == f["carrier"])
-                  | (df["Marketing_Airline_Network"].astype(str) == f["carrier"]))]
+               & (df["Flight_Number_Reporting_Airline"] == int(f["operating_number"]))
+               & (df["Reporting_Airline"].astype(str) == f["operating_carrier"])]
         if len(m) == 1:
             r = m.iloc[0]
             con.execute("update flights set actual_delay=?, cancelled=?, outcome_source='bts' where id=?",
