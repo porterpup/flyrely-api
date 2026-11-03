@@ -93,7 +93,6 @@ def _load_airports_ref(path: Path = AIRPORTS_REF_PATH) -> dict:
 AIRPORTS_REF = _load_airports_ref()
 # Airport coordinates for weather lookups and distance estimates
 AIRPORT_COORDS = {c: (float(r["lat"]), float(r["lon"])) for c, r in AIRPORTS_REF.items()}
-AIRPORT_NAMES = {c: r["name"] for c, r in AIRPORTS_REF.items()}
 
 # Historical delay rates by airport (from training data)
 AIRPORT_DELAY_RATES = {
