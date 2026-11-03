@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backtest"))
@@ -68,3 +69,15 @@ def test_fetch_bts_rejects_non_numeric_args():
         r = _fetch(*args)
         assert r.returncode == 2, (args, r.stderr)
         assert "numeric" in r.stderr and "fetching" not in r.stdout
+
+
+def test_fetch_weather_refuses_holdout_end(monkeypatch):
+    import fetch_weather
+    monkeypatch.delenv("FLYRELY_HOLDOUT_UNLOCK", raising=False)
+    for end in ("2026-09-01", "2027-01-31", "garbage"):
+        with pytest.raises(SystemExit) as e:
+            fetch_weather.main(["--end", end])
+        assert "holdout" in str(e.value) or "invalid" in str(e.value)
+    fetch_weather.check_holdout("2026-08-31")           # last allowed day passes
+    monkeypatch.setenv("FLYRELY_HOLDOUT_UNLOCK", "1")
+    fetch_weather.check_holdout("2026-09-30")           # explicit unlock passes

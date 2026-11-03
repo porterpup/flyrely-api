@@ -10,9 +10,11 @@ already fetched. Coordinates come from models/airports_ref.csv.
 """
 
 import argparse
+import os
 import re
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -28,6 +30,20 @@ URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 VARIABLES = ["precipitation", "snowfall", "wind_gusts_10m", "cape", "weather_code"]
 LEADS = (1, 7)
 START, END = "2025-01-01", "2026-08-31"  # fit, validation and holdout row months
+
+
+HOLDOUT_LAST_ALLOWED = "2026-08-31"  # months from 2026-09 on are the untouched holdout
+
+
+def check_holdout(end: str) -> None:
+    """Refuse to fetch weather into the holdout period unless FLYRELY_HOLDOUT_UNLOCK=1."""
+    try:
+        end_d = date.fromisoformat(end)
+    except ValueError:
+        raise SystemExit(f"invalid --end '{end}': expected YYYY-MM-DD")
+    if end_d > date.fromisoformat(HOLDOUT_LAST_ALLOWED) and os.environ.get("FLYRELY_HOLDOUT_UNLOCK") != "1":
+        raise SystemExit(f"refusing --end {end}: dates after {HOLDOUT_LAST_ALLOWED} are the untouched holdout "
+                         "(set FLYRELY_HOLDOUT_UNLOCK=1 to override)")
 
 
 def busiest_airports(n: int) -> list[str]:
@@ -70,6 +86,7 @@ def main(argv=None):
     ap.add_argument("--end", default=END, help=f"last date to fetch (default {END})")
     ap.add_argument("--budget-min", type=float, default=0, help="stop starting new airports after this many minutes (0 = no limit)")
     args = ap.parse_args(argv)
+    check_holdout(args.end)
 
     OUT.mkdir(parents=True, exist_ok=True)
     ref = pd.read_csv(REF).set_index("iata")  # models/airports_ref.csv (built from OurAirports)
