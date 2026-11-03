@@ -23,13 +23,14 @@ API Endpoints:
     GET  /usage/export      - Prediction usage log as CSV
 """
 
+import math
 import os
 import json
 import csv
 import time
 import uuid
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from pathlib import Path
 from io import StringIO
@@ -93,7 +94,6 @@ def _load_airports_ref(path: Path = AIRPORTS_REF_PATH) -> dict:
 AIRPORTS_REF = _load_airports_ref()
 # Airport coordinates for weather lookups and distance estimates
 AIRPORT_COORDS = {c: (float(r["lat"]), float(r["lon"])) for c, r in AIRPORTS_REF.items()}
-AIRPORT_NAMES = {c: r["name"] for c, r in AIRPORTS_REF.items()}
 
 # Historical delay rates by airport (from training data)
 AIRPORT_DELAY_RATES = {
@@ -267,6 +267,23 @@ class WeatherService:
         self.provider = provider
         self.client = httpx.AsyncClient(timeout=10.0)
         self._cache = {}  # Simple in-memory cache, keyed per airport per hour
+        self._calls_day = None  # UTC date the call counter applies to
+        self._calls_today = 0
+
+    def _take_budget(self) -> bool:
+        """Count one outbound provider call against the daily budget (FLYRELY_WEATHER_DAILY_BUDGET,
+        default 450, under Tomorrow.io's 500/day free tier). False once spent: weather is then skipped."""
+        today = datetime.now(timezone.utc).date()
+        if self._calls_day != today:
+            self._calls_day, self._calls_today = today, 0
+        try:
+            budget = int(os.getenv("FLYRELY_WEATHER_DAILY_BUDGET", "450"))
+        except ValueError:
+            budget = 450
+        if self._calls_today >= budget:
+            return False
+        self._calls_today += 1
+        return True
 
     async def get_weather(self, airport_code: str) -> Optional[dict]:
         """Get current weather for an airport, or None if unavailable."""
@@ -280,6 +297,10 @@ class WeatherService:
         cache_key = f"{airport_code}_{datetime.now().strftime('%Y%m%d%H')}"
         if cache_key in self._cache:
             return self._cache[cache_key]
+
+        if not self._take_budget():
+            logger.warning("Weather daily call budget spent; skipping weather for %s", airport_code)
+            return None
 
         try:
             if self.provider == "tomorrow":
@@ -503,11 +524,17 @@ def get_days_to_holiday(dt: datetime) -> int:
 
 
 def estimate_distance(origin: str, dest: str) -> float:
-    """Estimate flight distance in miles."""
+    """Great-circle (haversine) distance in statute miles, minimum 100.
+
+    The longitude difference is normalised to [-180, 180] so routes that cross the
+    antimeridian (e.g. GUM-HNL) are measured the short way round.
+    """
     lat1, lon1 = AIRPORT_COORDS.get(origin.upper(), (39.8, -98.5))  # Default: center US
     lat2, lon2 = AIRPORT_COORDS.get(dest.upper(), (39.8, -98.5))
-    # Rough approximation: 1 degree ≈ 69 miles
-    distance = ((abs(lat2 - lat1) * 69) ** 2 + (abs(lon2 - lon1) * 69 * 0.7) ** 2) ** 0.5
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlon = math.radians((lon2 - lon1 + 180) % 360 - 180)
+    h = math.sin((phi2 - phi1) / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlon / 2) ** 2
+    distance = 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
     return max(distance, 100)  # Minimum 100 miles
 
 

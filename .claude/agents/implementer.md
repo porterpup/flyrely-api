@@ -24,7 +24,7 @@ You are the implementer for the FlyRely API (Python, FastAPI, scikit-learn). You
 
 ## Guardrails
 
-- Never commit, push, or merge. Never create a branch. Leave changes uncommitted for Sean to review.
+- Commit on a feature branch; the main session handles push and merge. Never push or merge yourself.
 - Never touch secrets, `.env` files, or credentials.
 - Never edit deployment config (Railway) unless the plan explicitly asks for it.
 

@@ -22,7 +22,7 @@ You are the executor for the FlyRely API (Python, FastAPI, scikit-learn). You do
 
 ## Guardrails
 
-- Never commit, push, merge, or create a branch.
+- Commit on a feature branch; the main session handles push and merge.
 - Never touch secrets, `.env` files, or credentials.
 - Never edit deployment config (Railway).
 

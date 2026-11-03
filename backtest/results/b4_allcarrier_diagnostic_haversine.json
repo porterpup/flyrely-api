@@ -1,0 +1,193 @@
+{
+  "note": "committed 18-feature model, raw predict_proba, airline = operating carrier (Reporting_Airline); data = parquet_v2",
+  "period": "2026-01..2026-08",
+  "n_flights": 5227724,
+  "share_previously_missing": 0.0954,
+  "parity_mismatches_of_2000": 0,
+  "overall": {
+    "n_flown": 5108811,
+    "observed_delay_rate": 0.2365,
+    "mean_predicted": 0.2354,
+    "auc": 0.6765,
+    "brier": 0.1677,
+    "ece": 0.0053
+  },
+  "previously_missing_carriers": {
+    "n_flown": 483752,
+    "observed_delay_rate": 0.2034,
+    "mean_predicted": 0.2229,
+    "auc": 0.6339,
+    "brier": 0.1571,
+    "ece": 0.0228
+  },
+  "other_carriers": {
+    "n_flown": 4625059,
+    "observed_delay_rate": 0.24,
+    "mean_predicted": 0.2367,
+    "auc": 0.6799,
+    "brier": 0.1689,
+    "ece": 0.0065
+  },
+  "thirty_airport_routes": {
+    "n_flown": 1690354,
+    "observed_delay_rate": 0.2558,
+    "mean_predicted": 0.2401,
+    "auc": 0.682,
+    "brier": 0.1758,
+    "ece": 0.0166
+  },
+  "by_carrier": {
+    "9E": {
+      "n_flown": 164010,
+      "observed_delay_rate": 0.2344,
+      "mean_predicted": 0.2369,
+      "auc": 0.6315,
+      "brier": 0.1729,
+      "ece": 0.0167
+    },
+    "AA": {
+      "n_flown": 649852,
+      "observed_delay_rate": 0.2761,
+      "mean_predicted": 0.235,
+      "auc": 0.6722,
+      "brier": 0.1874,
+      "ece": 0.0411
+    },
+    "AS": {
+      "n_flown": 225011,
+      "observed_delay_rate": 0.2057,
+      "mean_predicted": 0.196,
+      "auc": 0.6146,
+      "brier": 0.1597,
+      "ece": 0.0242
+    },
+    "B6": {
+      "n_flown": 158490,
+      "observed_delay_rate": 0.2836,
+      "mean_predicted": 0.2691,
+      "auc": 0.6894,
+      "brier": 0.1855,
+      "ece": 0.0152
+    },
+    "C5": {
+      "n_flown": 54314,
+      "observed_delay_rate": 0.1657,
+      "mean_predicted": 0.1994,
+      "auc": 0.5854,
+      "brier": 0.139,
+      "ece": 0.0397
+    },
+    "DL": {
+      "n_flown": 681085,
+      "observed_delay_rate": 0.189,
+      "mean_predicted": 0.214,
+      "auc": 0.6558,
+      "brier": 0.1467,
+      "ece": 0.025
+    },
+    "F9": {
+      "n_flown": 143993,
+      "observed_delay_rate": 0.2788,
+      "mean_predicted": 0.2902,
+      "auc": 0.6439,
+      "brier": 0.1919,
+      "ece": 0.0262
+    },
+    "G4": {
+      "n_flown": 86755,
+      "observed_delay_rate": 0.2525,
+      "mean_predicted": 0.3028,
+      "auc": 0.6947,
+      "brier": 0.1748,
+      "ece": 0.0503
+    },
+    "G7": {
+      "n_flown": 56499,
+      "observed_delay_rate": 0.2477,
+      "mean_predicted": 0.2756,
+      "auc": 0.5972,
+      "brier": 0.1875,
+      "ece": 0.0528
+    },
+    "MQ": {
+      "n_flown": 212712,
+      "observed_delay_rate": 0.1854,
+      "mean_predicted": 0.2223,
+      "auc": 0.6295,
+      "brier": 0.1485,
+      "ece": 0.0369
+    },
+    "NK": {
+      "n_flown": 43677,
+      "observed_delay_rate": 0.3514,
+      "mean_predicted": 0.2504,
+      "auc": 0.6496,
+      "brier": 0.2244,
+      "ece": 0.101
+    },
+    "OH": {
+      "n_flown": 153102,
+      "observed_delay_rate": 0.2766,
+      "mean_predicted": 0.2767,
+      "auc": 0.6481,
+      "brier": 0.1897,
+      "ece": 0.02
+    },
+    "OO": {
+      "n_flown": 566344,
+      "observed_delay_rate": 0.2056,
+      "mean_predicted": 0.2154,
+      "auc": 0.6117,
+      "brier": 0.1599,
+      "ece": 0.0215
+    },
+    "PT": {
+      "n_flown": 99821,
+      "observed_delay_rate": 0.1849,
+      "mean_predicted": 0.2129,
+      "auc": 0.6478,
+      "brier": 0.1449,
+      "ece": 0.0287
+    },
+    "QX": {
+      "n_flown": 62281,
+      "observed_delay_rate": 0.189,
+      "mean_predicted": 0.1898,
+      "auc": 0.6496,
+      "brier": 0.1466,
+      "ece": 0.0077
+    },
+    "UA": {
+      "n_flown": 552427,
+      "observed_delay_rate": 0.197,
+      "mean_predicted": 0.2494,
+      "auc": 0.6716,
+      "brier": 0.152,
+      "ece": 0.0524
+    },
+    "WN": {
+      "n_flown": 918288,
+      "observed_delay_rate": 0.3072,
+      "mean_predicted": 0.2501,
+      "auc": 0.7419,
+      "brier": 0.1867,
+      "ece": 0.0635
+    },
+    "YV": {
+      "n_flown": 46827,
+      "observed_delay_rate": 0.143,
+      "mean_predicted": 0.2032,
+      "auc": 0.6034,
+      "brier": 0.1261,
+      "ece": 0.0601
+    },
+    "YX": {
+      "n_flown": 233323,
+      "observed_delay_rate": 0.1881,
+      "mean_predicted": 0.2205,
+      "auc": 0.6335,
+      "brier": 0.1491,
+      "ece": 0.0324
+    }
+  }
+}
