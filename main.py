@@ -38,12 +38,13 @@ import numpy as np
 import pandas as pd
 import joblib
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 import codeshare
+import prediction_log
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -169,6 +170,9 @@ class UsageLogger:
 
 
 usage_logger = UsageLogger(USAGE_LOG_PATH)
+
+# Durable prediction log (SQLite, or Postgres when DATABASE_URL is set)
+prediction_store = prediction_log.PredictionStore()
 
 # =============================================================================
 # Pydantic Models (canonical /predict contract)
@@ -691,7 +695,7 @@ async def export_usage():
 
 
 @app.post("/predict", response_model=PredictionResponse)
-async def predict_delay(request: FlightRequest):
+async def predict_delay(request: FlightRequest, background_tasks: BackgroundTasks):
     """
     Predict flight delay risk.
 
@@ -753,6 +757,18 @@ async def predict_delay(request: FlightRequest):
         "model_version": MODEL_VERSION,
         "model_ms": model_ms,
     })
+
+    try:
+        background_tasks.add_task(prediction_store.safe_write, prediction_log.build_record(
+            flight_id=flight_id, origin=origin, dest=destination, sched_dep_local=dep_time,
+            marketing_airline=airline, marketing_number=flight_number,
+            operating_airline=operator["operating_airline"] if operator else None,
+            operating_number=operator["operating_flight_number"] if operator else None,
+            delay_probability=round(probability, 3), risk_level=risk_level,
+            model_version=MODEL_VERSION, features=features,
+            weather_available=weather_origin is not None and weather_dest is not None))
+    except Exception as e:
+        logger.warning(f"Prediction log record build failed: {e}")
 
     return PredictionResponse(
         flight_id=flight_id,
