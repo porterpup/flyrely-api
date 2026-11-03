@@ -7,7 +7,7 @@
 # FLYRELY_HOLDOUT_UNLOCK=1.
 set -eu
 HOLDOUT_START=2026-09
-FIRST=${1:-2024}; LAST=${2:-2026}; LAST_MONTH=${3:-8}
+FIRST=${1-2024}; LAST=${2-2026}; LAST_MONTH=${3-8}   # an explicit empty arg is rejected below, not defaulted
 DIR="$(dirname "$0")/../data/bts/marketing"
 
 # Args must be purely numeric: a typo like "9x" must not slip past the lock below. POSIX sh only (runs under dash in CI).
