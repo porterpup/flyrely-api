@@ -3,7 +3,7 @@ B4 diagnostic: re-score the committed 18-feature model on all-carrier 2026-01..0
 operating carrier mapped correctly, and compare the six carriers the old Reporting Carrier
 data omitted (9E, PT, QX, G7, C5, YV) against the rest.
 
-    python backtest/b4_diagnostic.py     # writes backtest/results/b4_allcarrier_diagnostic.json
+    python backtest/b4_diagnostic.py     [out_filename]   # writes backtest/results/<out_filename> (default b4_allcarrier_diagnostic.json)
 
 Diagnostic only: nothing is retrained and models/ is untouched.
 """
@@ -36,6 +36,7 @@ def main():
     feats = bt.committed_features(hold)
     p = bt.main.model_service.model.predict_proba(feats)[:, 1]
     is_missing = hold["Reporting_Airline"].isin(MISSING).to_numpy()
+    thirty = (hold["Origin"].isin(bt.main.AIRPORT_DELAY_RATES) & hold["Dest"].isin(bt.main.AIRPORT_DELAY_RATES)).to_numpy()
     out = {
         "note": "committed 18-feature model, raw predict_proba, airline = operating carrier (Reporting_Airline); data = parquet_v2",
         "period": "2026-01..2026-08", "n_flights": int(len(hold)),
@@ -44,12 +45,14 @@ def main():
         "overall": metrics(hold, p),
         "previously_missing_carriers": metrics(hold[is_missing], p[is_missing]),
         "other_carriers": metrics(hold[~is_missing], p[~is_missing]),
+        "thirty_airport_routes": metrics(hold[thirty], p[thirty]),
         "by_carrier": {c: metrics(hold[hold["Reporting_Airline"] == c], p[(hold["Reporting_Airline"] == c).to_numpy()])
                        for c in sorted(hold["Reporting_Airline"].unique())},
     }
-    path = bt.RESULTS / "b4_allcarrier_diagnostic.json"
+    name = sys.argv[1] if len(sys.argv) > 1 else "b4_allcarrier_diagnostic.json"  # registered file is never the default target of re-runs
+    path = bt.RESULTS / name
     path.write_text(json.dumps(out, indent=2))
-    for k in ("overall", "previously_missing_carriers", "other_carriers"):
+    for k in ("overall", "thirty_airport_routes", "previously_missing_carriers", "other_carriers"):
         print(k, out[k])
     print("parity mismatches:", out["parity_mismatches_of_2000"])
 
