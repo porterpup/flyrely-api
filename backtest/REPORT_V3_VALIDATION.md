@@ -19,9 +19,11 @@ day used. The leakage test asserts no feature uses a day later than D-G.
 
 ## Results
 
+Reproduce: `venv/bin/python backtest/experiments_v3.py --gaps 1,31,60,90,120 --full-gaps 1,90,120 --sample 0.2` (these are now the defaults; the committed run used exactly this).
+
 **Verdict: DO NOT ADOPT.** Chosen servable variant V90|K=3; Brier minus committed +0.00106, 95% CI [+0.00033, +0.00174]. Trailing features help only with a live feed (G=1 AUC 0.696 vs 0.677 for B1) and the lagged (G>=90) feed adds nothing over the baseline; rolling recalibration fixes ECE (0.04 to about 0.015) but not Brier relative to the committed model.
 
-Runtime: about 27 min wall for the first pass (lean-table + features + 8 model fits, 06:48-07:11) plus 3.2 min for the final cached evaluation pass; well inside the 2 h box. Sample fraction for non-full gaps: 0.2; full-data gaps: [1, 90, 120]. Fit: weights 2025-01..09, isotonic 2025-10..12, rates from prior 12 months.
+Runtime: about 27 min wall for the first pass (lean-table + features + 7 model fits, 06:48-07:11) plus 3.2 min for the final cached evaluation pass; well inside the 2 h box. Sample fraction for non-full gaps: 0.2; full-data gaps: [1, 90, 120]. Fit: weights 2025-01..09, isotonic 2025-10..12, rates from prior 12 months.
 
 ### Grid: AUC / Brier / ECE, overall 2026-01..08 (flown flights)
 
@@ -121,6 +123,6 @@ Brier(chosen) - Brier(committed): 0.00106, 95% day-block bootstrap CI [0.00033, 
   synthetic data; features are unchanged (G in 1, 31, 90, 120). The brief said "no day >= departure - G"; with the G=1
   = yesterday convention the newest permitted day is D-G itself, so the test asserts no day > D-G.
 - HGB weights are fit on 2025-01..09 and isotonic on 2025-10..12 (backtest.py's fit/val split inside 2025), rather than
-  a single 2025-01..12 fit. Recalibration for Jan-Feb 2026 with K=3 uses 2025-08/09 predictions, which are in-sample for the weights.
+  a single 2025-01..12 fit. Recalibration for early 2026 months uses 2025 predictions that are in-sample: with K>=1, January 2026 recalibrates on 2025-10, which lies inside the isotonic calibration window (the weights never saw it, but the calibrator was fit on it); with K=3 Jan-Feb also use 2025-08/09, which are in-sample for the weights.
 - Long-run rates for 2026 rows use all of 2025 (as backtest.py does), slightly more than BTS would have published at the time.
 - 2026-01..08 is validation, not a holdout; the selection above used it and the clean holdout (2026-09 onward) was never loaded.

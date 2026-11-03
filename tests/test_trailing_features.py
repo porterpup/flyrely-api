@@ -132,3 +132,25 @@ def test_lagged_route_stats_ignore_the_row_and_serve_row_matches():
         assert booking.serve_row(row, tables).equals(X.iloc[i].astype(float).rename(i)) or same(booking.serve_row(row, tables), X.iloc[i])
     unseen = df.iloc[[0]].assign(Origin="XXX")
     assert np.isnan(tables.features(unseen)["Distance"].iloc[0])
+
+
+def test_unseen_group_falls_back_to_parent_rate():
+    """A group with no flights in the window gets exactly its parent's rate, down the chain fn -> rt -> (o, d) -> global."""
+    A = synth()
+    C = recent.daily_counters(A)
+    day = 150
+    win = (A["day"] > day - 1 - 30) & (A["day"] <= day - 1)
+    flown = win & ~A["cancelled"]
+    g_delay = A["d15"][flown].sum() / flown.sum()
+    g_cancel = A["cancelled"][win].sum() / win.sum()
+    q = {k: np.array([v]) for k, v in {"day": day, "o_id": 77, "d_id": 78, "al_id": 0, "nw_id": 0, "rt_id": 7777,
+                                      "oh_id": 7778, "fn_id": 7779, "g_id": 0}.items()}
+    q["al_id"], q["nw_id"] = np.array([55]), np.array([56])  # unseen carrier / network too
+    out = recent.trailing_serve_row(q, C, 1)
+    for n in ("o", "d", "al", "nw", "rt", "oh", "fn"):
+        assert np.isclose(out[f"t30_{n}_delay"], g_delay) and np.isclose(out[f"t30_{n}_cancel"], g_cancel)
+    # a partially sparse group moves only part of the way from its parent (smoothing, not replacement)
+    seen = {k: A[k][[0]] for k in ["day", "o_id", "d_id", "al_id", "nw_id", "rt_id", "oh_id", "fn_id", "g_id"]}
+    seen["day"] = np.array([day])
+    r = recent.trailing_serve_row(seen, C, 1)
+    assert not np.isclose(r["t30_fn_delay"], r["t30_rt_delay"]) or not np.isclose(r["t30_rt_delay"], g_delay)

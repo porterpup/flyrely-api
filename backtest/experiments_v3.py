@@ -3,7 +3,7 @@ B1 experiments (validation only): do trailing recent-performance features and ro
 2026 level shift of the booking-time model?  2026-01..08 is VALIDATION (PROTOCOL_ADDENDUM_2026-11.md); the clean
 holdout (2026-09 onward) is never loaded: this script hard-fails if any month >= 2026-09 is requested or present.
 
-    python backtest/experiments_v3.py [--gaps 1,31,60,90,120] [--full-gaps 1,90] [--sample 0.2] [--report-only]
+    python backtest/experiments_v3.py [--gaps 1,31,60,90,120] [--full-gaps 1,90,120] [--sample 0.2] [--report-only]
 
 SELECTION RULE (pre-registered before any result was produced)
   1. Candidates are SERVABLE variants only: data gap G >= 90 days (G=90 or 120), each with recalibration
@@ -25,7 +25,10 @@ Design
   * Flight-number features are blanked on a random 30% of training rows (seed 42).
   * Rolling recalibration: logistic intercept+slope on the logit of the model probability, fitted on the last K
     published months; validation month m may use months <= m-3 (BTS lag).  Months before 2026 used for this come
-    from the 2025 fit window (2025-01..09 predictions are in-sample for the weights; noted in the report).
+    from the 2025 fit window (2025-01..09 predictions are in-sample for the weights and 2025-10..12 for the isotonic calibrator; see the report).
+  * Caches (data/cache/v3) are keyed by variant name, which encodes the gap (V90) and a `_s` suffix for the 20% day
+    sample; the sample fraction and --full-gaps are NOT in the key. Delete data/cache/v3/pred_*.npy after changing
+    --sample, --full-gaps or any feature/model code (trail_G*.parquet and base_*.parquet depend only on code and data).
   * Bootstrap: day blocks, 1,000 resamples, seed 42.
 """
 
@@ -388,11 +391,13 @@ def write_report(res):
                          "Status: results below were produced by `backtest/experiments_v3.py` (rule committed in ea49a5f before the run)."))
     ch = res["selection"]["chosen"]; bb = res["bootstrap_vs_committed"]
     L.append("\n## Results\n")
+    L.append("Reproduce: `venv/bin/python backtest/experiments_v3.py --gaps 1,31,60,90,120 --full-gaps 1,90,120 --sample 0.2` "
+             "(these are now the defaults; the committed run used exactly this).\n")
     L.append(f"**Verdict: {'ADOPT' if bb['adopt'] else 'DO NOT ADOPT'}.** Chosen servable variant {ch}; Brier minus committed "
              f"{bb['diff']:+.5f}, 95% CI [{bb['ci95'][0]:+.5f}, {bb['ci95'][1]:+.5f}]. Trailing features help only with a live feed "
              "(G=1 AUC 0.696 vs 0.677 for B1) and the lagged (G>=90) feed adds nothing over the baseline; "
              "rolling recalibration fixes ECE (0.04 to about 0.015) but not Brier relative to the committed model.\n")
-    L.append(f"Runtime: about 27 min wall for the first pass (lean-table + features + 8 model fits, 06:48-07:11) plus {res['runtime_minutes']} min for the final cached evaluation pass; well inside the 2 h box. Sample fraction for non-full gaps: {res['design']['sample_fraction_for_non_full_gaps']}; "
+    L.append(f"Runtime: about 27 min wall for the first pass (lean-table + features + 7 model fits, 06:48-07:11) plus {res['runtime_minutes']} min for the final cached evaluation pass; well inside the 2 h box. Sample fraction for non-full gaps: {res['design']['sample_fraction_for_non_full_gaps']}; "
              f"full-data gaps: {res['design']['full_gaps']}. Fit: {res['design']['fit']}.\n")
     L.append("### Grid: AUC / Brier / ECE, overall 2026-01..08 (flown flights)\n")
     L.append("| Variant | K | AUC | Brier | ECE | worst-month ECE | Jan ECE | Jan Brier | Jan AUC |\n|---|---|---|---|---|---|---|---|---|")
@@ -440,7 +445,7 @@ def write_report(res):
   synthetic data; features are unchanged (G in 1, 31, 90, 120). The brief said "no day >= departure - G"; with the G=1
   = yesterday convention the newest permitted day is D-G itself, so the test asserts no day > D-G.
 - HGB weights are fit on 2025-01..09 and isotonic on 2025-10..12 (backtest.py's fit/val split inside 2025), rather than
-  a single 2025-01..12 fit. Recalibration for Jan-Feb 2026 with K=3 uses 2025-08/09 predictions, which are in-sample for the weights.
+  a single 2025-01..12 fit. Recalibration for early 2026 months uses 2025 predictions that are in-sample: with K>=1, January 2026 recalibrates on 2025-10, which lies inside the isotonic calibration window (the weights never saw it, but the calibrator was fit on it); with K=3 Jan-Feb also use 2025-08/09, which are in-sample for the weights.
 - Long-run rates for 2026 rows use all of 2025 (as backtest.py does), slightly more than BTS would have published at the time.
 - 2026-01..08 is validation, not a holdout; the selection above used it and the clean holdout (2026-09 onward) was never loaded.
 """)
@@ -450,7 +455,7 @@ def write_report(res):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gaps", default="1,31,60,90,120")
-    ap.add_argument("--full-gaps", default="1,90")
+    ap.add_argument("--full-gaps", default="1,90,120")
     ap.add_argument("--sample", type=float, default=0.2)
     ap.add_argument("--report-only", action="store_true")
     a = ap.parse_args()
