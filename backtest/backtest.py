@@ -2,7 +2,7 @@
 FlyRely BTS holdout backtest — implements backtest/PROTOCOL.md (pre-registered).
 
     python backtest/prepare.py --source marketing   # zips -> data/bts/parquet_v2
-    python backtest/backtest.py     # writes backtest/results/
+    python backtest/backtest.py     # writes backtest/results/*_v2data.* (never overwrites the registered results.json)
 
 Models:
   committed  models/flight_delay_model.joblib, features built exactly as the API does
@@ -27,6 +27,9 @@ import main  # noqa: E402  production feature builder + committed model paths
 
 from paths import BTS_PARQUET as PARQUET  # noqa: E402  the one constant for the BTS data dir
 RESULTS = Path(__file__).resolve().parent / "results"
+# The registered result (results.json, calibration.png, booking_model_candidate.joblib) was produced on the
+# original data and must stay intact; re-runs on the all-carrier Marketing data write *_v2data files.
+SUFFIX = "_v2data"
 SEED = 42
 
 # Rows each model sees, and the trailing 12 months its historical rates come from
@@ -318,9 +321,9 @@ def main_run():
         return g.reindex(g["gap"].abs().sort_values(ascending=False).index).head(8).round(4).reset_index().to_dict("records")
     results["failure_analysis"] = {c: worst(c) for c in ("Reporting_Airline", "Origin", "dep_hour", "month")}
 
-    (RESULTS / "results.json").write_text(json.dumps(results, indent=2, default=float))
+    (RESULTS / f"results{SUFFIX}.json").write_text(json.dumps(results, indent=2, default=float))
     joblib.dump({"model": m_b, "calibrator": iso_b, "features": list(Xb["fit"].columns)},
-                RESULTS / "booking_model_candidate.joblib")
+                RESULTS / f"booking_model_candidate{SUFFIX}.joblib")
     plot_calibration(results)
     print(json.dumps({k: results[k]["checks"] for k in ("committed", "booking", "dayof")}, indent=2))
 
@@ -340,7 +343,7 @@ def plot_calibration(results: dict):
     ax.set_title("Calibration on 2026 holdout")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(RESULTS / "calibration.png", dpi=150)
+    fig.savefig(RESULTS / f"calibration{SUFFIX}.png", dpi=150)
 
 
 if __name__ == "__main__":
