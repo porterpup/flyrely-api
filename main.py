@@ -81,19 +81,19 @@ USAGE_LOG_PATH = Path(os.getenv("FLYRELY_USAGE_LOG", Path(__file__).parent / "us
 # Weather API cost estimate: Tomorrow.io free tier = 500 calls/day
 WEATHER_COST_PER_CALL = 0.001  # USD
 
+# Airport reference table (coords, names, time zones) built by scripts/build_airports_ref.py
+AIRPORTS_REF_PATH = MODEL_DIR / "airports_ref.csv"
+
+
+def _load_airports_ref(path: Path = AIRPORTS_REF_PATH) -> dict:
+    with path.open(newline="") as f:
+        return {r["iata"]: r for r in csv.DictReader(f)}
+
+
+AIRPORTS_REF = _load_airports_ref()
 # Airport coordinates for weather lookups and distance estimates
-AIRPORT_COORDS = {
-    "ATL": (33.6407, -84.4277), "ORD": (41.9742, -87.9073), "DFW": (32.8998, -97.0403),
-    "DEN": (39.8561, -104.6737), "LAX": (33.9425, -118.4081), "JFK": (40.6413, -73.7781),
-    "SFO": (37.6213, -122.3790), "SEA": (47.4502, -122.3088), "MIA": (25.7959, -80.2870),
-    "PHX": (33.4373, -112.0078), "LAS": (36.0840, -115.1537), "MCO": (28.4312, -81.3081),
-    "CLT": (35.2140, -80.9431), "EWR": (40.6895, -74.1745), "BOS": (42.3656, -71.0096),
-    "MSP": (44.8848, -93.2223), "DTW": (42.2162, -83.3554), "PHL": (39.8744, -75.2424),
-    "LGA": (40.7769, -73.8740), "DCA": (38.8512, -77.0402), "IAH": (29.9902, -95.3368),
-    "SLC": (40.7899, -111.9791), "SAN": (32.7338, -117.1933), "TPA": (27.9756, -82.5333),
-    "PDX": (45.5898, -122.5951), "BWI": (39.1774, -76.6684), "FLL": (26.0742, -80.1506),
-    "MDW": (41.7868, -87.7522), "BNA": (36.1263, -86.6774), "AUS": (30.1975, -97.6664),
-}
+AIRPORT_COORDS = {c: (float(r["lat"]), float(r["lon"])) for c, r in AIRPORTS_REF.items()}
+AIRPORT_NAMES = {c: r["name"] for c, r in AIRPORTS_REF.items()}
 
 # Historical delay rates by airport (from training data)
 AIRPORT_DELAY_RATES = {

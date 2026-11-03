@@ -20,6 +20,7 @@ is run in-process from main.py.
 """
 
 import argparse
+import csv
 import os
 import sqlite3
 import sys
@@ -35,19 +36,13 @@ CHECKPOINTS = {"booking": None, "7d": timedelta(days=7), "1d": timedelta(days=1)
                "3h": timedelta(hours=3), "1h": timedelta(hours=1)}
 WINDOW = timedelta(minutes=30)  # a checkpoint counts if logged within this long after its time
 
-TZ = {
-    "America/New_York": "ATL BOS BWI CLT CVG DCA DTW EWR FLL IAD JAX JFK LGA MCO MIA ORF PBI PHL PIT "
-                        "RDU RIC RSW SAV SRQ SYR TPA BDL BUF CHS CLE CMH IND PVD ALB GSP MYR PWM BTV",
-    "America/Chicago": "AUS BNA DAL DFW HOU IAH MCI MDW MEM MKE MSP MSY OKC OMA ORD SAT STL TUL DSM "
-                       "BHM LIT ICT MSN",
-    "America/Denver": "DEN ABQ BOI SLC ELP COS",
-    "America/Phoenix": "PHX TUS",
-    "America/Los_Angeles": "BUR LAS LAX LGB OAK ONT PDX SAN SEA SFO SJC SMF SNA PSP GEG RNO",
-    "America/Anchorage": "ANC",
-    "Pacific/Honolulu": "HNL OGG KOA LIH",
-    "America/Puerto_Rico": "SJU",
-}
-AIRPORT_TZ = {code: tz for tz, codes in TZ.items() for code in codes.split()}
+def _load_airport_tz() -> dict:
+    """IANA time zone per airport from models/airports_ref.csv (scripts/build_airports_ref.py)."""
+    with (ROOT / "models" / "airports_ref.csv").open(newline="") as f:
+        return {r["iata"]: r["tz"] for r in csv.DictReader(f)}
+
+
+AIRPORT_TZ = _load_airport_tz()
 
 SCHEMA = """
 create table if not exists flights (
