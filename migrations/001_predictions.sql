@@ -32,3 +32,14 @@ create index if not exists idx_predictions_sched_dep_utc on predictions (sched_d
 
 alter table predictions enable row level security;
 -- Intentionally no policies.
+
+-- Also remove PostgREST role grants (guarded so it works on non-Supabase Postgres).
+do $$
+begin
+    if exists (select 1 from pg_roles where rolname = 'anon') then
+        revoke all on predictions from anon;
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'authenticated') then
+        revoke all on predictions from authenticated;
+    end if;
+end $$;

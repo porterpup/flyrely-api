@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import closing
 from datetime import date, datetime, timezone
@@ -97,7 +98,24 @@ _PG_DDL = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_predictions_flight_id ON predictions (flight_id)",
     "CREATE INDEX IF NOT EXISTS idx_predictions_sched_dep_utc ON predictions (sched_dep_utc)",
+    # Server-side only: RLS on with no policies, and no PostgREST role access.
+    "ALTER TABLE predictions ENABLE ROW LEVEL SECURITY",
+    """DO $$
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            REVOKE ALL ON predictions FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            REVOKE ALL ON predictions FROM authenticated;
+        END IF;
+    END $$""",
 ]
+
+# Postgres safety: bound every connection/statement, and stop writing after
+# repeated failures so a dead DB cannot pin threadpool threads.
+PG_CONNECT_KWARGS = {"connect_timeout": 5, "options": "-c statement_timeout=5000"}
+BREAKER_THRESHOLD = 3
+BREAKER_COOLDOWN_S = 60
 
 
 def to_utc(local_dt: datetime, airport: str) -> Optional[datetime]:
@@ -105,6 +123,9 @@ def to_utc(local_dt: datetime, airport: str) -> Optional[datetime]:
     tz = AIRPORT_TZ.get(airport)
     if not tz:
         return None
+    # DST: zoneinfo uses fold=0, so an ambiguous fall-back time resolves to the first
+    # (daylight) occurrence, and a non-existent spring-forward time is read with the
+    # pre-transition offset. The result can be off by up to an hour on those two nights.
     return local_dt.replace(tzinfo=ZoneInfo(tz)).astimezone(timezone.utc)
 
 
@@ -156,6 +177,12 @@ class PredictionStore:
         self.database_url = database_url if database_url is not None else os.getenv("DATABASE_URL")
         self.sqlite_path = Path(sqlite_path or os.getenv("FLYRELY_PREDICTION_DB", "./data/predictions.sqlite"))
         self._ready = False
+        self._failures = 0
+        self._paused_until = 0.0
+
+    def _connect_pg(self):
+        import psycopg
+        return psycopg.connect(self.database_url, **PG_CONNECT_KWARGS)
 
     @property
     def backend(self) -> str:
@@ -165,15 +192,20 @@ class PredictionStore:
         if self._ready:
             return
         if self.database_url:
-            import psycopg
-            with psycopg.connect(self.database_url) as conn:
+            with self._connect_pg() as conn:
                 for stmt in _PG_DDL:
                     conn.execute(stmt)
         else:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-            with closing(sqlite3.connect(self.sqlite_path)) as conn:
+            with closing(self._connect_sqlite()) as conn:
                 conn.executescript(_SQLITE_DDL)
         self._ready = True
+
+    def _connect_sqlite(self):
+        conn = sqlite3.connect(self.sqlite_path, timeout=5)
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
     def write(self, rec: dict) -> None:
         """Insert one row. Raises on failure; use safe_write for best-effort."""
@@ -181,12 +213,11 @@ class PredictionStore:
         cols = ", ".join(COLUMNS)
         row = dict(rec)
         if self.database_url:
-            import psycopg
             from psycopg.types.json import Jsonb
             for k in ("features_json", "live_inputs_json"):
                 if row[k] is not None:
                     row[k] = Jsonb(json.loads(_dumps(row[k])))
-            with psycopg.connect(self.database_url) as conn:
+            with self._connect_pg() as conn:
                 conn.execute(
                     f"INSERT INTO predictions ({cols}) VALUES ({', '.join(['%s'] * len(COLUMNS))})",
                     [row[c] for c in COLUMNS])
@@ -197,14 +228,25 @@ class PredictionStore:
             row["features_json"] = _dumps(row["features_json"])
             row["live_inputs_json"] = _dumps(row["live_inputs_json"])
             row["weather_available"] = int(row["weather_available"])
-            with closing(sqlite3.connect(self.sqlite_path)) as conn:
+            with closing(self._connect_sqlite()) as conn:
                 with conn:
                     conn.execute(
                         f"INSERT INTO predictions ({cols}) VALUES ({', '.join(['?'] * len(COLUMNS))})",
                         [row[c] for c in COLUMNS])
 
     def safe_write(self, rec: dict) -> None:
+        """Best-effort write with a circuit breaker: after BREAKER_THRESHOLD consecutive
+        failures, skip writes for BREAKER_COOLDOWN_S seconds."""
+        if time.monotonic() < self._paused_until:
+            return
         try:
             self.write(rec)
+            self._failures = 0
         except Exception as e:
+            self._failures += 1
             logger.warning(f"Prediction log write failed: {type(e).__name__}: {e}")
+            if self._failures >= BREAKER_THRESHOLD:
+                self._paused_until = time.monotonic() + BREAKER_COOLDOWN_S
+                self._failures = 0
+                logger.warning(f"Prediction log paused for {BREAKER_COOLDOWN_S}s after "
+                               f"{BREAKER_THRESHOLD} consecutive failures")
