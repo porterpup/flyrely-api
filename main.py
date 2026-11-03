@@ -23,6 +23,7 @@ API Endpoints:
     GET  /usage/export      - Prediction usage log as CSV
 """
 
+import math
 import os
 import json
 import csv
@@ -502,11 +503,17 @@ def get_days_to_holiday(dt: datetime) -> int:
 
 
 def estimate_distance(origin: str, dest: str) -> float:
-    """Estimate flight distance in miles."""
+    """Great-circle (haversine) distance in statute miles, minimum 100.
+
+    The longitude difference is normalised to [-180, 180] so routes that cross the
+    antimeridian (e.g. GUM-HNL) are measured the short way round.
+    """
     lat1, lon1 = AIRPORT_COORDS.get(origin.upper(), (39.8, -98.5))  # Default: center US
     lat2, lon2 = AIRPORT_COORDS.get(dest.upper(), (39.8, -98.5))
-    # Rough approximation: 1 degree ≈ 69 miles
-    distance = ((abs(lat2 - lat1) * 69) ** 2 + (abs(lon2 - lon1) * 69 * 0.7) ** 2) ** 0.5
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlon = math.radians((lon2 - lon1 + 180) % 360 - 180)
+    h = math.sin((phi2 - phi1) / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlon / 2) ** 2
+    distance = 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
     return max(distance, 100)  # Minimum 100 miles
 
 
