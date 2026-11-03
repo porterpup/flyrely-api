@@ -16,7 +16,8 @@ import httpx
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-PARQUET = ROOT / "data" / "bts" / "parquet"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import BTS_PARQUET as PARQUET  # noqa: E402  the one constant for the BTS data dir
 OUT = ROOT / "data" / "weather"
 AIRPORTS = ROOT / "data" / "ref" / "airports.csv"
 

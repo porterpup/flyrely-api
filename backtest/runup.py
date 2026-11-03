@@ -1,7 +1,7 @@
 """
 FlyRely run-up backtest — implements backtest/PROTOCOL_RUNUP.md (pre-registered).
 
-    python backtest/prepare.py          # zips -> data/bts/parquet
+    python backtest/prepare.py --source marketing   # zips -> data/bts/parquet_v2 (read via backtest.PARQUET)
     python backtest/fetch_weather.py    # optional: enables weather variant W
     python backtest/runup.py            # writes backtest/results/runup.json
     python backtest/runup.py --quick    # debug run on validation months only (never touches holdout)

@@ -110,6 +110,11 @@ AIRLINE_DELAY_RATES = {
     "NK": 0.28, "F9": 0.27, "G4": 0.26, "HA": 0.16, "SY": 0.25,
     # Regional operators flying for the majors (BTS 2025, departures delayed 15+ min)
     "OO": 0.185, "YX": 0.18, "MQ": 0.184, "OH": 0.256,
+    # Six further regional operators, added once all-carrier BTS data (data/bts/parquet_v2, built from
+    # the Marketing Carrier file) was available. Same definition and window as the regionals above:
+    # calendar-2025 BTS flown flights by operating carrier, DepDelay >= 15 min (the window was verified
+    # by reproducing OO/YX/MQ/OH exactly). 9E Endeavor, PT Piedmont, QX Horizon, G7 GoJet, C5 CommutAir, YV Mesa.
+    "9E": 0.209, "PT": 0.174, "QX": 0.159, "G7": 0.250, "C5": 0.175, "YV": 0.171,
 }
 
 # Hub airports
