@@ -1,0 +1,4 @@
+-r requirements.txt
+# Parquet engine for the backtest/prepare tests (not needed in the production image)
+pyarrow==26.0.0
+pytest

@@ -10,7 +10,13 @@ HOLDOUT_START=2026-09
 FIRST=${1:-2024}; LAST=${2:-2026}; LAST_MONTH=${3:-8}
 DIR="$(dirname "$0")/../data/bts/marketing"
 
-HS_Y=${HOLDOUT_START%-*}; HS_M=$(( 10#${HOLDOUT_START#*-} ))
+# Args must be purely numeric: a typo like "9x" must not slip past the lock below. POSIX sh only (runs under dash in CI).
+for x in "$FIRST" "$LAST" "$LAST_MONTH"; do
+  case $x in ''|*[!0-9]*) echo "invalid argument '$x': year/month arguments must be numeric" >&2; exit 2;; esac
+done
+# expr strips leading zeros portably ("09" -> 9) without bash-only 10# arithmetic.
+LAST=$(expr "$LAST" + 0); FIRST=$(expr "$FIRST" + 0); LAST_MONTH=$(expr "$LAST_MONTH" + 0)
+HS_Y=${HOLDOUT_START%-*}; HS_M=$(expr "${HOLDOUT_START#*-}" + 0)
 if [ "${FLYRELY_HOLDOUT_UNLOCK:-0}" != "1" ] && \
    { [ "$LAST" -gt "$HS_Y" ] || { [ "$LAST" -eq "$HS_Y" ] && [ "$LAST_MONTH" -ge "$HS_M" ]; }; }; then
   echo "refusing to download ${LAST}_${LAST_MONTH}: months >= $HOLDOUT_START are the untouched holdout (set FLYRELY_HOLDOUT_UNLOCK=1 to override)" >&2

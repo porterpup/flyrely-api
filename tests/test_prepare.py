@@ -56,3 +56,15 @@ def test_holdout_lock_refuses_before_any_download():
         assert r.returncode == 2, (args, r.stderr)
         assert "holdout" in r.stderr
         assert "fetching" not in r.stdout        # exited before the download loop
+
+
+def test_holdout_lock_handles_leading_zero_month():
+    r = _fetch("2026", "2026", "09")
+    assert r.returncode == 2 and "holdout" in r.stderr, r.stderr
+
+
+def test_fetch_bts_rejects_non_numeric_args():
+    for args in (("2026", "2026", "9x"), ("2026x", "2026", "1"), ("2024", "", "1"), ("2026", "2026", "-1")):
+        r = _fetch(*args)
+        assert r.returncode == 2, (args, r.stderr)
+        assert "numeric" in r.stderr and "fetching" not in r.stdout
