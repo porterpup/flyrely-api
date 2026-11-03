@@ -98,7 +98,20 @@ def test_codeshare_is_modelled_as_operator_but_shown_as_ticketing_airline(monkey
     assert (body["operating_airline"], body["operating_airline_name"]) == ("OO", "SkyWest Airlines")
 
 
-def test_codeshare_operator_without_history_falls_back_to_ticketing_airline():
+def test_codeshare_operator_9e_uses_its_own_rate_with_no_fallback_warning(monkeypatch):
+    seen = {}
+    real = main.build_features
+    monkeypatch.setattr(main, "build_features", lambda o, d, t, a: seen.setdefault("airline", a) and real(o, d, t, a))
+    req = {**CANONICAL_REQUEST, "origin": "FWA", "destination": "ATL", "airline": "DL", "flight_number": "4632"}
+    body = client.post("/predict", json=req).json()
+    assert seen["airline"] == "9E"
+    assert main.build_features("FWA", "ATL", datetime(2026, 11, 15, 18), "9E")["airline_delay_rate"] == 0.209
+    assert body["operating_airline"] == "9E"
+    assert not any("Endeavor" in w or "9E" in w or "operator" in w for w in body["warnings"])
+
+
+def test_codeshare_operator_without_history_falls_back_to_ticketing_airline(monkeypatch):
+    monkeypatch.delitem(main.AIRLINE_DELAY_RATES, "9E")
     req = {**CANONICAL_REQUEST, "origin": "FWA", "destination": "ATL", "airline": "DL", "flight_number": "4632"}
     body = client.post("/predict", json=req).json()
     assert body["operating_airline"] == "9E"

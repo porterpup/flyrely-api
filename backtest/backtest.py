@@ -1,7 +1,7 @@
 """
 FlyRely BTS holdout backtest — implements backtest/PROTOCOL.md (pre-registered).
 
-    python backtest/prepare.py      # zips -> data/bts/parquet
+    python backtest/prepare.py --source marketing   # zips -> data/bts/parquet_v2
     python backtest/backtest.py     # writes backtest/results/
 
 Models:
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import main  # noqa: E402  production feature builder + committed model paths
 
-PARQUET = ROOT / "data" / "bts" / "parquet"
+from paths import BTS_PARQUET as PARQUET  # noqa: E402  the one constant for the BTS data dir
 RESULTS = Path(__file__).resolve().parent / "results"
 SEED = 42
 
@@ -74,7 +74,7 @@ def days_to_holiday(dates: pd.Series) -> pd.Series:
 
 def committed_features(df: pd.DataFrame) -> pd.DataFrame:
     """Vectorised copy of main.build_features (verified against it in check_parity)."""
-    airline = df["Marketing_Airline_Network"]
+    airline = df["Reporting_Airline"]  # operating carrier, as /predict resolves it via codeshare
     fallback = airline.map(main.AIRLINE_DELAY_RATES).fillna(0.20)
     origin_rate = df["Origin"].map(main.AIRPORT_DELAY_RATES).fillna(fallback)
     dest_rate = df["Dest"].map(main.AIRPORT_DELAY_RATES).fillna(fallback)
@@ -115,7 +115,7 @@ def check_parity(df: pd.DataFrame, feats: pd.DataFrame, n: int = 2000) -> int:
     mismatches = 0
     for idx, r in sample.iterrows():
         dep = pd.Timestamp(r["FlightDate"]).to_pydatetime().replace(hour=int(r["dep_hour"]))
-        ref = main.build_features(r["Origin"], r["Dest"], dep, r["Marketing_Airline_Network"])
+        ref = main.build_features(r["Origin"], r["Dest"], dep, r["Reporting_Airline"])
         row = feats.loc[idx]
         if any(not np.isclose(float(ref[k]), float(row[k])) for k in feats.columns):
             mismatches += 1

@@ -21,21 +21,6 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("flyrely.prediction_log")
 
-# IANA zones for the airports FlyRely has coordinates for (main.AIRPORT_COORDS).
-# Airports not listed get sched_dep_utc = NULL rather than a guess.
-AIRPORT_TZ = {
-    "ATL": "America/New_York", "ORD": "America/Chicago", "DFW": "America/Chicago",
-    "DEN": "America/Denver", "LAX": "America/Los_Angeles", "JFK": "America/New_York",
-    "SFO": "America/Los_Angeles", "SEA": "America/Los_Angeles", "MIA": "America/New_York",
-    "PHX": "America/Phoenix", "LAS": "America/Los_Angeles", "MCO": "America/New_York",
-    "CLT": "America/New_York", "EWR": "America/New_York", "BOS": "America/New_York",
-    "MSP": "America/Chicago", "DTW": "America/New_York", "PHL": "America/New_York",
-    "LGA": "America/New_York", "DCA": "America/New_York", "IAH": "America/Chicago",
-    "SLC": "America/Denver", "SAN": "America/Los_Angeles", "TPA": "America/New_York",
-    "PDX": "America/Los_Angeles", "BWI": "America/New_York", "FLL": "America/New_York",
-    "MDW": "America/Chicago", "BNA": "America/Chicago", "AUS": "America/Chicago",
-}
-
 COLUMNS = [
     "prediction_id", "ts_utc", "flight_id", "client", "origin", "dest",
     "sched_dep_local", "sched_dep_utc", "marketing_airline", "marketing_number",
@@ -120,7 +105,11 @@ BREAKER_COOLDOWN_S = 60
 
 def to_utc(local_dt: datetime, airport: str) -> Optional[datetime]:
     """Convert a naive local departure time to UTC using the origin airport's zone, or None if unknown."""
-    tz = AIRPORT_TZ.get(airport)
+    # Single source for time zones: models/airports_ref.csv, loaded by main (imported lazily
+    # because main imports this module). Airports not in the table get NULL rather than a guess.
+    import main
+    ref = main.AIRPORTS_REF.get(airport)
+    tz = ref.get("tz") if ref else None
     if not tz:
         return None
     # DST: zoneinfo uses fold=0, so an ambiguous fall-back time resolves to the first
