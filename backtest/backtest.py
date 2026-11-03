@@ -25,6 +25,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import main  # noqa: E402  production feature builder + committed model paths
 
+from flyrely_features.booking import (  # noqa: E402  shared with serving; re-exported for callers
+    SMOOTHING, booking_features, days_to_holiday, smoothed_rate,
+)
 from paths import BTS_PARQUET as PARQUET  # noqa: E402  the one constant for the BTS data dir
 RESULTS = Path(__file__).resolve().parent / "results"
 # The registered result (results.json, calibration.png, booking_model_candidate.joblib) was produced on the
@@ -38,7 +41,6 @@ PERIODS = {
     "val":     {"rows": ("2025-07", "2025-12"), "rates": ("2024-07", "2025-06")},
     "holdout": {"rows": ("2026-01", "2026-08"), "rates": ("2025-01", "2025-12")},
 }
-SMOOTHING = 50  # pseudo-flights pulling sparse groups toward the global rate
 LOW, HIGH = 0.20, 0.30  # calibration v2 tier thresholds used in production
 
 
@@ -64,11 +66,6 @@ def load_months(start: str, end: str) -> pd.DataFrame:
     df["severe"] = np.where(df["cancelled"], np.nan, (df["DepDelay"] >= 120).astype(float))
     df["disrupted"] = ((df["DepDelay"] >= 15) | df["cancelled"] | df["diverted"]).astype(float)
     return df
-
-
-def days_to_holiday(dates: pd.Series) -> pd.Series:
-    lookup = {d: main.get_days_to_holiday(pd.Timestamp(d).to_pydatetime()) for d in dates.unique()}
-    return dates.map(lookup).astype(int)
 
 
 # =============================================================================
@@ -123,42 +120,6 @@ def check_parity(df: pd.DataFrame, feats: pd.DataFrame, n: int = 2000) -> int:
         if any(not np.isclose(float(ref[k]), float(row[k])) for k in feats.columns):
             mismatches += 1
     return mismatches
-
-
-def smoothed_rate(hist: pd.DataFrame, keys: list[str], target: str, prior: float) -> pd.DataFrame:
-    g = hist.groupby(keys, observed=True)[target].agg(["sum", "count"]).reset_index()
-    g[f"rate_{'_'.join(keys)}_{target}"] = (g["sum"] + SMOOTHING * prior) / (g["count"] + SMOOTHING)
-    return g.drop(columns=["sum", "count"])
-
-
-def booking_features(df: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
-    """Booking-time features. Every rate comes from `hist` (months strictly earlier)."""
-    flown = hist[~hist["cancelled"]]
-    p_delay = flown["delayed"].mean()
-    p_cancel = hist["cancelled"].mean()
-    out = df[["dep_hour", "dow", "month", "Distance", "CRSElapsedTime"]].copy()
-    out["days_to_holiday"] = days_to_holiday(df["FlightDate"])
-
-    for keys in (["Origin"], ["Dest"], ["Origin", "Dest"], ["Reporting_Airline"],
-                 ["Reporting_Airline", "Origin"], ["Origin", "dep_hour"],
-                 ["Reporting_Airline", "dep_hour"], ["Origin", "month"],
-                 ["Reporting_Airline", "Origin", "Dest", "dep_hour"]):
-        r = smoothed_rate(flown, keys, "delayed", p_delay)
-        out = out.join(df[keys].merge(r, on=keys, how="left").set_index(df.index).iloc[:, len(keys):])
-    for keys in (["Origin"], ["Reporting_Airline"], ["Origin", "month"]):
-        r = smoothed_rate(hist.assign(c=hist["cancelled"].astype(float)), keys, "c", p_cancel)
-        out = out.join(df[keys].merge(r, on=keys, how="left").set_index(df.index).iloc[:, len(keys):])
-
-    days = hist["FlightDate"].nunique()
-    for col in ("Origin", "Dest"):
-        vol = (hist.groupby(col).size() / days).rename(f"{col}_daily_flights")
-        out[vol.name] = df[col].map(vol)
-
-    # Unseen groups get the global rate (what a new route would honestly get)
-    rate_cols = [c for c in out.columns if c.startswith("rate_")]
-    for c in rate_cols:
-        out[c] = out[c].fillna(p_cancel if c.endswith("_c") else p_delay)
-    return out.astype(float)
 
 
 def dayof_features(df: pd.DataFrame, booking: pd.DataFrame) -> pd.DataFrame:
