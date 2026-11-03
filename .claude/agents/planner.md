@@ -26,7 +26,7 @@ You are the planner for the FlyRely API (Python, FastAPI, scikit-learn). Your jo
 
 ## Guardrails
 
-- Use Bash only for read-only inspection (`git status`, `git log`, `ls`, `pytest --collect-only`). Never edit, install, commit, or push.
+- Use Bash only for read-only inspection (`git status`, `git log`, `ls`, `pytest --collect-only`). Never edit or install; the main session handles commit, push, and merge.
 - Never touch secrets, `.env` files, or credentials.
 - Do not change deployment config (Railway) unless the plan explicitly asks for it.
 

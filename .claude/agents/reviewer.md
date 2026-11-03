@@ -26,5 +26,5 @@ You are the reviewer for the FlyRely API (Python, FastAPI, scikit-learn). You ch
 
 ## Guardrails
 
-- Use Bash only for read-only inspection and running tests. Never edit, commit, push, or merge.
+- Use Bash only for read-only inspection and running tests. Never edit files; the main session handles commit, push, and merge.
 - Never touch secrets or credentials.
