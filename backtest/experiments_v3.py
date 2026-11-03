@@ -221,7 +221,7 @@ def recalibrate(p, rows, K):
         use = [str(mp - 3 - i) for i in range(K)]
         sel = np.isin(ym, use) & flown & ~np.isnan(p)
         lr = LogisticRegression(C=1e9, max_iter=200).fit(logit(p[sel])[:, None], y[sel])
-        t = ym == m
+        t = (ym == m) & ~np.isnan(p)
         out[t] = lr.predict_proba(logit(p[t])[:, None])[:, 1]
     return out
 
@@ -375,7 +375,76 @@ def run(args):
     res["regional_carriers"] = reg
     res["runtime_minutes"] = round((time.time() - t_start) / 60, 1)
     (RESULTS / "v3_validation.json").write_text(json.dumps(res, indent=2, default=float))
+    write_report(res)
     log("wrote v3_validation.json; chosen", best, res["bootstrap_vs_committed"])
+
+
+def write_report(res):
+    f = lambda x: f"{x:.4f}"
+    V = res["variants"]
+    L = []
+    pre = (HERE / "REPORT_V3_VALIDATION.md").read_text().split("\n## Results")[0].rstrip()
+    L.append(pre.replace("Status: PRE-REGISTERED RULE (written before any result). Results are appended below by the run.",
+                         "Status: results below were produced by `backtest/experiments_v3.py` (rule committed in ea49a5f before the run)."))
+    ch = res["selection"]["chosen"]; bb = res["bootstrap_vs_committed"]
+    L.append("\n## Results\n")
+    L.append(f"**Verdict: {'ADOPT' if bb['adopt'] else 'DO NOT ADOPT'}.** Chosen servable variant {ch}; Brier minus committed "
+             f"{bb['diff']:+.5f}, 95% CI [{bb['ci95'][0]:+.5f}, {bb['ci95'][1]:+.5f}]. Trailing features help only with a live feed "
+             "(G=1 AUC 0.696 vs 0.677 for B1) and the lagged (G>=90) feed adds nothing over the baseline; "
+             "rolling recalibration fixes ECE (0.04 to about 0.015) but not Brier relative to the committed model.\n")
+    L.append(f"Runtime: about 27 min wall for the first pass (lean-table + features + 8 model fits, 06:48-07:11) plus {res['runtime_minutes']} min for the final cached evaluation pass; well inside the 2 h box. Sample fraction for non-full gaps: {res['design']['sample_fraction_for_non_full_gaps']}; "
+             f"full-data gaps: {res['design']['full_gaps']}. Fit: {res['design']['fit']}.\n")
+    L.append("### Grid: AUC / Brier / ECE, overall 2026-01..08 (flown flights)\n")
+    L.append("| Variant | K | AUC | Brier | ECE | worst-month ECE | Jan ECE | Jan Brier | Jan AUC |\n|---|---|---|---|---|---|---|---|---|")
+    star = lambda n: n + ("" if not n.startswith("V") or int(n[1:]) in res["design"]["full_gaps"] else " *")
+    rowsl = [("committed", None, res["committed"])] + [(star(k.split("|")[0]), k.split("|")[1][2:], v) for k, v in V.items()]
+    for n, k, v in rowsl:
+        o, j = v["overall"], v["monthly"]["2026-01"]
+        L.append(f"| {n} | {k or ''} | {f(o['auc'])} | {f(o['brier'])} | {f(o['ece'])} | {f(v['worst_month_ece'])} | {f(j['ece'])} | {f(j['brier'])} | {f(j['auc'])} |")
+    L.append("\nB0 = current booking set (row's own Distance/CRSElapsedTime); B1 = serving-parity baseline; V<G> = B1 + trailing features at gap G; "
+             "`*` = fit and scored on a 20% random day-sample only (not comparable row-for-row with the others; G=31 and 60 are diagnostics). K=None means no recalibration.\n")
+    L.append("### Per-month Brier / ECE / AUC (no recalibration, and K=3)\n")
+    for k in [x for x in V if x.endswith("K=None") or x.endswith("K=3")]:
+        mm = V[k]["monthly"]
+        L.append(f"- **{k}**: " + "; ".join(f"{m[5:]}: {f(v['brier'])}/{f(v['ece'])}/{f(v['auc'])}" for m, v in mm.items()))
+    sel = res["selection"]
+    L.append("\n### Selection (pre-registered)\n")
+    L.append(f"Candidates (Brier): {sel['candidates_brier']}\n\nChosen: **{sel['chosen']}**\n")
+    b = res["bootstrap_vs_committed"]
+    L.append(f"Brier(chosen) - Brier(committed): {b['diff']:.5f}, 95% day-block bootstrap CI [{b['ci95'][0]:.5f}, {b['ci95'][1]:.5f}] "
+             f"({b['n_days']} days, {b['n_flights']:,} flights). **Adopt: {'YES' if b['adopt'] else 'NO'}** (needs CI entirely below 0).\n")
+    b2 = res["bootstrap_chosen_vs_B1_same_K"]; b3 = res["bootstrap_baseline_B1_vs_committed"]
+    L.append(f"- Chosen minus B1 (same K): {b2['diff']:.5f} CI [{b2['ci95'][0]:.5f}, {b2['ci95'][1]:.5f}]")
+    L.append(f"- B1 (no recal) minus committed: {b3['diff']:.5f} CI [{b3['ci95'][0]:.5f}, {b3['ci95'][1]:.5f}]\n")
+    L.append("### Cost of the data gap: G=90 vs G=1 (value of a live recent-actuals feed)\n")
+    L.append("| K | Brier G=1 | Brier G=90 | Brier(90) - Brier(1) [95% CI] | AUC G=1 | AUC G=90 | ECE G=1 | ECE G=90 |\n|---|---|---|---|---|---|---|---|")
+    for K, d in res.get("bootstrap_G90_minus_G1", {}).items():
+        a, c = V[f"V1|K={K}"]["overall"], V[f"V90|K={K}"]["overall"]
+        L.append(f"| {K} | {f(a['brier'])} | {f(c['brier'])} | {d['diff']:.5f} [{d['ci95'][0]:.5f}, {d['ci95'][1]:.5f}] | {f(a['auc'])} | {f(c['auc'])} | {f(a['ece'])} | {f(c['ece'])} |")
+    if res.get("no_flight_number_eval"):
+        L.append("\n### Serving without a flight number (flight-number features NaN at validation, same model, no recalibration)\n")
+        for n, o in res["no_flight_number_eval"].items():
+            L.append(f"- {n}: AUC {f(o['auc'])}, Brier {f(o['brier'])}, ECE {f(o['ece'])}")
+    L.append("\n### Per-carrier ECE, six regional carriers (n, ECE, mean predicted vs observed)\n")
+    L.append("| Carrier | chosen | B1 (no recal) | committed |\n|---|---|---|---|")
+    for c in REGIONAL:
+        cells = []
+        for lab in ("chosen", "B1", "committed"):
+            r = res["regional_carriers"][lab][c]
+            cells.append("n/a" if r is None else f"{f(r['ece'])} ({r['mean_pred']:.3f} vs {r['observed']:.3f}, n={r['n']:,})")
+        L.append(f"| {c} | " + " | ".join(cells) + " |")
+    L.append("""
+### Leakage test and caveats
+
+- `tests/test_trailing_features.py` rebuilds the counters from only days <= D-G and flips every outcome after D-G on
+  synthetic data; features are unchanged (G in 1, 31, 90, 120). The brief said "no day >= departure - G"; with the G=1
+  = yesterday convention the newest permitted day is D-G itself, so the test asserts no day > D-G.
+- HGB weights are fit on 2025-01..09 and isotonic on 2025-10..12 (backtest.py's fit/val split inside 2025), rather than
+  a single 2025-01..12 fit. Recalibration for Jan-Feb 2026 with K=3 uses 2025-08/09 predictions, which are in-sample for the weights.
+- Long-run rates for 2026 rows use all of 2025 (as backtest.py does), slightly more than BTS would have published at the time.
+- 2026-01..08 is validation, not a holdout; the selection above used it and the clean holdout (2026-09 onward) was never loaded.
+""")
+    (HERE / "REPORT_V3_VALIDATION.md").write_text("\n".join(L))
 
 
 def main():
@@ -384,7 +453,11 @@ def main():
     ap.add_argument("--full-gaps", default="1,90")
     ap.add_argument("--sample", type=float, default=0.2)
     ap.add_argument("--report-only", action="store_true")
-    run(ap.parse_args())
+    a = ap.parse_args()
+    if a.report_only:
+        write_report(json.loads((RESULTS / "v3_validation.json").read_text()))
+    else:
+        run(a)
 
 
 if __name__ == "__main__":
