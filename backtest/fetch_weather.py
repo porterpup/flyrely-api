@@ -2,12 +2,15 @@
 Fetch archived weather *forecasts* (Open-Meteo Previous Runs API, free, no key)
 for the busiest BTS airports, as they were issued 1 and 7 days ahead.
 
-    python backtest/fetch_weather.py [top_n]   # default 100 airports
+    python backtest/fetch_weather.py [top_n] [--airports ATL,ORD] [--end 2026-08-31]
+                                              # default: busiest 100 in parquet_v2 + the app's 30
 
 Writes one Parquet per airport to data/weather/ (UTC hourly). Skips airports
-already fetched. Needs data/ref/airports.csv (OurAirports) for coordinates.
+already fetched. Coordinates come from models/airports_ref.csv.
 """
 
+import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -19,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import BTS_PARQUET as PARQUET  # noqa: E402  the one constant for the BTS data dir
 OUT = ROOT / "data" / "weather"
-AIRPORTS = ROOT / "data" / "ref" / "airports.csv"
+REF = ROOT / "models" / "airports_ref.csv"
 
 URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 VARIABLES = ["precipitation", "snowfall", "wind_gusts_10m", "cape", "weather_code"]
@@ -36,10 +39,10 @@ def busiest_airports(n: int) -> list[str]:
     return list(counts.sort_values(ascending=False).index[:n])
 
 
-def fetch(client: httpx.Client, iata: str, lat: float, lon: float) -> pd.DataFrame:
+def fetch(client: httpx.Client, iata: str, lat: float, lon: float, end: str = END) -> pd.DataFrame:
     hourly = [f"{v}_previous_day{d}" for v in VARIABLES for d in LEADS]
     params = {"latitude": lat, "longitude": lon, "hourly": ",".join(hourly),
-              "start_date": START, "end_date": END, "timezone": "GMT"}
+              "start_date": START, "end_date": end, "timezone": "GMT"}
     for attempt in range(8):
         r = client.get(URL, params=params)
         if r.status_code == 429:
@@ -54,23 +57,50 @@ def fetch(client: httpx.Client, iata: str, lat: float, lon: float) -> pd.DataFra
     raise RuntimeError(f"{iata}: still rate-limited")
 
 
-def main(top_n: int):
+def app_airports() -> list[str]:
+    """The airports the app's autocomplete offers (flyrely-app/src/lib/airports.ts), read-only."""
+    ts = ROOT.parent / "flyrely-app" / "src" / "lib" / "airports.ts"
+    return re.findall(r"code:\s*'([A-Z]{3})'", ts.read_text()) if ts.exists() else []
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("top_n", nargs="?", type=int, default=100, help="busiest airports in parquet_v2 (default 100)")
+    ap.add_argument("--airports", help="comma-separated IATA codes to fetch instead of the busiest-N list")
+    ap.add_argument("--end", default=END, help=f"last date to fetch (default {END})")
+    ap.add_argument("--budget-min", type=float, default=0, help="stop starting new airports after this many minutes (0 = no limit)")
+    args = ap.parse_args(argv)
+
     OUT.mkdir(parents=True, exist_ok=True)
-    ref = pd.read_csv(AIRPORTS, usecols=["iata_code", "latitude_deg", "longitude_deg", "iso_country"])
-    ref = ref.dropna(subset=["iata_code"]).drop_duplicates("iata_code").set_index("iata_code")
+    ref = pd.read_csv(REF).set_index("iata")  # models/airports_ref.csv (built from OurAirports)
+    wanted = ([c.strip().upper() for c in args.airports.split(",")] if args.airports
+              else list(dict.fromkeys(busiest_airports(args.top_n) + app_airports())))
+    started, done, failed = time.time(), 0, {}
     with httpx.Client(timeout=300) as client:
-        for iata in busiest_airports(top_n):
+        for iata in wanted:
             out = OUT / f"{iata}.parquet"
             if out.exists():
                 continue
+            if args.budget_min and (time.time() - started) / 60 > args.budget_min:
+                print(f"time budget reached; resume with the same command ({len(wanted) - done} left)")
+                break
             if iata not in ref.index:
-                print(f"{iata}: no coordinates, skipped")
+                failed[iata] = "no coordinates in models/airports_ref.csv"
+                print(f"{iata}: MISSING - {failed[iata]}")
                 continue
-            lat, lon = ref.loc[iata, ["latitude_deg", "longitude_deg"]]
-            fetch(client, iata, float(lat), float(lon)).to_parquet(out, index=False)
+            try:
+                fetch(client, iata, float(ref.loc[iata, "lat"]), float(ref.loc[iata, "lon"]), args.end) \
+                    .to_parquet(out, index=False)
+            except Exception as e:  # keep going; report at the end
+                failed[iata] = f"{type(e).__name__}: {e}"
+                print(f"{iata}: MISSING - {failed[iata]}")
+                continue
+            done += 1
             print(f"{iata} ok")
             time.sleep(8)  # stay well inside the free per-minute limit
+    if failed:
+        print("not fetched:", failed)
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 100)
+    main()
