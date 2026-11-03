@@ -30,7 +30,7 @@ import csv
 import time
 import uuid
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from pathlib import Path
 from io import StringIO
@@ -267,6 +267,23 @@ class WeatherService:
         self.provider = provider
         self.client = httpx.AsyncClient(timeout=10.0)
         self._cache = {}  # Simple in-memory cache, keyed per airport per hour
+        self._calls_day = None  # UTC date the call counter applies to
+        self._calls_today = 0
+
+    def _take_budget(self) -> bool:
+        """Count one outbound provider call against the daily budget (FLYRELY_WEATHER_DAILY_BUDGET,
+        default 450, under Tomorrow.io's 500/day free tier). False once spent: weather is then skipped."""
+        today = datetime.now(timezone.utc).date()
+        if self._calls_day != today:
+            self._calls_day, self._calls_today = today, 0
+        try:
+            budget = int(os.getenv("FLYRELY_WEATHER_DAILY_BUDGET", "450"))
+        except ValueError:
+            budget = 450
+        if self._calls_today >= budget:
+            return False
+        self._calls_today += 1
+        return True
 
     async def get_weather(self, airport_code: str) -> Optional[dict]:
         """Get current weather for an airport, or None if unavailable."""
@@ -280,6 +297,10 @@ class WeatherService:
         cache_key = f"{airport_code}_{datetime.now().strftime('%Y%m%d%H')}"
         if cache_key in self._cache:
             return self._cache[cache_key]
+
+        if not self._take_budget():
+            logger.warning("Weather daily call budget spent; skipping weather for %s", airport_code)
+            return None
 
         try:
             if self.provider == "tomorrow":

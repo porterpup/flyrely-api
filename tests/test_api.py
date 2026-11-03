@@ -209,3 +209,20 @@ def test_estimate_distance_great_circle_and_dateline():
     assert main.estimate_distance("HNL", "GUM") == main.estimate_distance("GUM", "HNL")
     assert main.estimate_distance("ATL", "ATL") == 100  # minimum
 
+
+def test_weather_daily_budget_skips_without_error(monkeypatch):
+    import asyncio
+    monkeypatch.setenv("FLYRELY_WEATHER_DAILY_BUDGET", "2")
+    svc = main.WeatherService("fake-key")
+    calls = []
+
+    async def fake_fetch(coords):
+        calls.append(coords)
+        return {"visibility_miles": 10, "wind_speed_mph": 5}
+
+    monkeypatch.setattr(svc, "_fetch_tomorrow_io", fake_fetch)
+    got = [asyncio.run(svc.get_weather(a)) for a in ("ATL", "ORD", "DEN", "LAX")]
+    assert got[0] and got[1] and got[2] is None and got[3] is None
+    assert len(calls) == 2
+    assert asyncio.run(svc.get_weather("ATL")) is not None  # cache hits cost nothing
+    assert len(calls) == 2
