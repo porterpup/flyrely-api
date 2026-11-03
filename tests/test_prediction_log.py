@@ -194,3 +194,12 @@ def test_postgres_roundtrip():
                            (rec["prediction_id"],)).fetchone()
         conn.execute("DELETE FROM predictions WHERE prediction_id = %s", (rec["prediction_id"],))
     assert row == ("app", {"a": 1.5})
+
+
+def test_newly_covered_airport_gets_utc(store):
+    # FWA is in models/airports_ref.csv but was not in the old 30-airport table
+    r = client.post("/predict", json={**REQ, "origin": "FWA", "destination": "ATL", "flight_id": "fwa-1"})
+    assert r.status_code == 200
+    (row,) = rows(store)
+    assert row["sched_dep_utc"] == "2030-11-15T23:30:00+00:00"  # America/Indiana/Indianapolis, EST
+    assert row["minutes_to_departure"] is not None
