@@ -23,10 +23,19 @@ def smoothed_rate(hist: pd.DataFrame, keys: list[str], target: str, prior: float
     return g.drop(columns=["sum", "count"])
 
 
+def route_carrier_medians(hist: pd.DataFrame) -> list:
+    """Median Distance / CRSElapsedTime by (Origin, Dest, Reporting_Airline), then by (Origin, Dest) as fallback."""
+    return [(keys, hist.groupby(keys, observed=True)[["Distance", "CRSElapsedTime"]].median())
+            for keys in (["Origin", "Dest", "Reporting_Airline"], ["Origin", "Dest"])]
+
+
 class BookingTables:
     """Rate tables computed once from `hist` (months strictly earlier); `features` looks rows up in them."""
 
-    def __init__(self, hist: pd.DataFrame):
+    def __init__(self, hist: pd.DataFrame, lagged_route_stats: bool = False):
+        self.lagged = lagged_route_stats
+        if lagged_route_stats:
+            self.route_stats = route_carrier_medians(hist)
         flown = hist[~hist["cancelled"]]
         self.p_delay = flown["delayed"].mean()
         self.p_cancel = hist["cancelled"].mean()
@@ -38,7 +47,16 @@ class BookingTables:
                        for col in ("Origin", "Dest")}
 
     def features(self, df: pd.DataFrame) -> pd.DataFrame:
-        out = df[["dep_hour", "dow", "month", "Distance", "CRSElapsedTime"]].copy()
+        if self.lagged:  # serving parity: schedule stats from lagged history, never from the row itself
+            out = df[["dep_hour", "dow", "month"]].copy()
+            for col, r in self.route_stats:
+                keys = list(r.index.names)
+                m = df[keys].merge(r.reset_index(), on=keys, how="left").set_index(df.index)
+                for c in ("Distance", "CRSElapsedTime"):
+                    out[c] = m[c] if c not in out else out[c].fillna(m[c])
+        else:
+            out = df[["dep_hour", "dow", "month", "Distance", "CRSElapsedTime"]].copy()
+        out = out[["dep_hour", "dow", "month", "Distance", "CRSElapsedTime"]]
         out["days_to_holiday"] = days_to_holiday(df["FlightDate"])
         for keys, r in self.delay + self.cancel:
             out = out.join(df[keys].merge(r, on=keys, how="left").set_index(df.index).iloc[:, len(keys):])
@@ -52,9 +70,9 @@ class BookingTables:
         return out.astype(float)
 
 
-def booking_features(df: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
+def booking_features(df: pd.DataFrame, hist: pd.DataFrame, lagged_route_stats: bool = False) -> pd.DataFrame:
     """Booking-time features. Every rate comes from `hist` (months strictly earlier)."""
-    return BookingTables(hist).features(df)
+    return BookingTables(hist, lagged_route_stats).features(df)
 
 
 def serve_row(row, tables: BookingTables) -> pd.Series:
