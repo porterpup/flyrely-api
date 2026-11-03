@@ -16,5 +16,8 @@ numpy>=1.24.0
 # Configuration
 python-dotenv>=1.0.0
 
+# Prediction log on Postgres/Supabase (only used when DATABASE_URL is set)
+psycopg[binary]==3.2.10
+
 # Optional: for production
 gunicorn>=21.0.0
