@@ -214,3 +214,12 @@ def test_holdout_lock_in_fetchers(monkeypatch):
         with pytest.raises(SystemExit):
             mod.check_holdout("2026-09-01")
         mod.check_holdout("2026-08-31")
+
+
+def test_decision_rule_is_the_preregistered_one():
+    import experiments_b5 as e
+    ok = {"ci95": [-0.002, -0.0005]}
+    assert e.decide(ok, 0.010, 0.008)["adopt"]                       # ECE +0.002 is within tolerance
+    assert not e.decide(ok, 0.020, 0.008)["adopt"]                   # ECE +0.012 is a material worsening
+    assert not e.decide({"ci95": [-0.002, 0.0001]}, 0.005, 0.008)["adopt"]   # CI touches 0
+    assert e.ECE_TOLERANCE == 0.005

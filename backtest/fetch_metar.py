@@ -72,7 +72,13 @@ def fetch_one(client: httpx.Client, station: str, first: date, last: date, tries
             os.environ.get("FLYRELY_HOLDOUT_UNLOCK") != "1":
         raise SystemExit("holdout lock")
     for k in range(tries):
-        r = client.get(URL, params=p, timeout=300)
+        try:
+            r = client.get(URL, params=p, timeout=300)
+        except httpx.TransportError as e:
+            wait = min(600, 20 * 2 ** k)
+            print(f"  {station} {first.year}: {e!r}, retry in {wait}s", flush=True)
+            time.sleep(wait)
+            continue
         if r.status_code == 200:
             return r.text
         wait = min(600, 20 * 2 ** k)
