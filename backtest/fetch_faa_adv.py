@@ -8,7 +8,8 @@ Advisories Database (https://www.fly.faa.gov/adv/advADB, no key).
 
 Phase 1 (`lists`): one request per day, listing every GS/GDP advisory of that day (number, control element,
 title, send time in UTC). Cached as data/faa_adv/list/<date>.html.
-Phase 2 (`details`): one request per non-cancel advisory at the chosen airports, to read the program period
+Phase 2 (`details`, optional; B5 uses `--sample` only to validate the default durations, because the server needs
+~7 s per page and the full set is ~17,000 pages): one request per non-cancel advisory, to read the program period
 ("GROUND STOP PERIOD", "CUMULATIVE PROGRAM PERIOD"). Cached as data/faa_adv/detail/<date>_<n>.txt.
 Phase 3 (`build`): parse into data/faa_adv/programs.parquet (one row per advisory).
 
@@ -181,6 +182,8 @@ def cmd_details(a):
     lst = list_frame()
     keep = lst[(lst["status"] != "cancel") & lst["element"].isin(top_airports(a.airports_top))]
     keep = keep.drop_duplicates(["adv_date", "advn"])
+    if a.sample:  # a random sample is enough to validate the default durations (the server takes ~7 s per page)
+        keep = keep[keep["status"] == "active"].sample(n=min(a.sample, len(keep)), random_state=0)
     (OUT / "detail").mkdir(parents=True, exist_ok=True)
     todo = [r for r in keep.itertuples() if not (OUT / "detail" / f"{r.adv_date}_{r.advn}.txt").exists()]
     print(f"{len(todo)} of {len(keep)} detail pages to fetch", flush=True)
@@ -202,7 +205,7 @@ def cmd_build(a):
     ends = []
     for r in lst.itertuples():
         f = OUT / "detail" / f"{r.adv_date}_{r.advn}.txt"
-        d = parse_detail(f.read_text(), r.sent_utc.to_pydatetime()) if f.exists() else \
+        d = parse_detail(f.read_text(), r.sent_utc.to_pydatetime()) if (a.use_details and f.exists()) else \
             {"period_start": pd.NaT, "period_end": pd.NaT}
         ends.append(d)
     out = pd.concat([lst.reset_index(drop=True), pd.DataFrame(ends)], axis=1)
@@ -223,6 +226,9 @@ def main():
         s.add_argument("--end", default=HOLDOUT_LAST_ALLOWED)
         s.add_argument("--pause", type=float, default=1.5)
         s.add_argument("--airports-top", type=int, default=100)
+        s.add_argument("--sample", type=int, default=0, help="details: fetch only N random active advisories")
+        s.add_argument("--use-details", action="store_true", help="build: read periods from cached detail pages "
+                       "(default: send time + documented default durations, for every advisory alike)")
     a = ap.parse_args()
     {"lists": cmd_lists, "details": cmd_details, "build": cmd_build}[a.cmd](a)
 

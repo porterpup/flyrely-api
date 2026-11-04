@@ -19,9 +19,12 @@ The product owner adds a source only if it helps.
 * METAR: `backtest/fetch_metar.py`. Routine and special reports, UTC, 2024-01-01 to 2026-08-31, for the 100 busiest
   airports in `parquet_v2` over 2025-2026 (the same list as `fetch_weather.py`). One request per airport-year, a
   2 s pause, back-off on 429/503, raw CSV cached in `data/metar/`.
-* FAA: `backtest/fetch_faa_adv.py`. One list page per day (all GS and GDP advisories of the day, send time in UTC), then
-  one detail page per non-cancel advisory at the same 100 airports to read the program period. Cached in
-  `data/faa_adv/`. Feasibility (historical retrievable and parseable) is established by this fetch and reported.
+* FAA: `backtest/fetch_faa_adv.py`. One list page per day (all GS and GDP advisories of the day: number, airport,
+  title, send time in UTC), 974 pages cached in `data/faa_adv/`. Historical data IS retrievable and parseable
+  (27,045 GS/GDP advisories 2024-01..2026-08). The per-advisory detail pages (program period) hold ~17,000 pages
+  for the 100 airports and the server needs ~7 s per page, so they are NOT fetched in full. Amendment recorded
+  before any evaluation: every advisory gets the same documented default period (below), and a random sample of
+  detail pages is fetched only to check those defaults.
 * Nothing dated 2026-09 or later is fetched or used (both scripts refuse it without `FLYRELY_HOLDOUT_UNLOCK=1`;
   `experiments_b5.py` hard-fails on a month >= 2026-09). 2026-09 onward stays the clean holdout.
 
@@ -72,9 +75,10 @@ Same cutoff for origin and destination: the destination feature is "weather at t
 ### B. FAA programs known at the cutoff, per side (`faa_{o,d}_*`)
 
 An advisory is visible from its send time (UTC). Per (airport, kind) the newest advisory sent at or before `c` is in
-force unless it is a cancellation (CNX); a later advisory of the same kind replaces it. Its program period comes from the
-advisory body ("GROUND STOP PERIOD", "CUMULATIVE PROGRAM PERIOD"); if the body has no period, a GS lasts 180 min and a
-GDP 720 min from the send time (the count of such advisories is reported). Features:
+force unless it is a cancellation (CNX); a later advisory of the same kind replaces it. Its program
+period is, for every advisory alike, from its send time for 180 min (GS) or 720 min (GDP); an earlier ending
+(cancellation, or a replacing advisory) takes precedence. (The detail-page period is not used; the sample check
+reports how well these defaults match the real periods.) Features:
 
 * `gs_now`: a ground stop in force whose period contains `c`.
 * `gdp_now`: a non-proposed GDP in force whose period contains `c`.
