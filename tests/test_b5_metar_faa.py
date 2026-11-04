@@ -203,8 +203,8 @@ def test_faa_missing_period_uses_documented_default():
                        "period_start": pd.NaT, "period_end": pd.NaT}])
     P = faa.Programs(p, AIRPORTS, ["ATL"])
     assert P.chains["GS"].n_missing_period == 1
-    assert feats(P, "2024-01-01 11:30", "2024-01-01 13:00", 60, o=0)["faa_o_gs_now"] == 1    # 10:30 < 09:00+180
-    assert feats(P, "2024-01-01 13:30", "2024-01-01 15:00", 60, o=0)["faa_o_gs_now"] == 0    # 12:30 > 12:00
+    assert feats(P, "2024-01-01 10:00", "2024-01-01 13:00", 60, o=0)["faa_o_gs_now"] == 1    # 09:00 < 10:30
+    assert feats(P, "2024-01-01 11:00", "2024-01-01 15:00", 60, o=0)["faa_o_gs_now"] == 0    # 10:00 >= 09:00+90
 
 
 def test_holdout_lock_in_fetchers(monkeypatch):

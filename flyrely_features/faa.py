@@ -14,8 +14,8 @@ import pandas as pd
 
 from ._common import DAY0, SHIFT, T
 
-GS_DEFAULT_MIN = 180      # period unknown (no body): assume a ground stop lasts 3 h from its send time
-GDP_DEFAULT_MIN = 720     # period unknown: assume a GDP lasts 12 h from its send time
+GS_DEFAULT_MIN = 90       # no period read: median real GS is 64 min, 90th pct 80 min (sample of 157, B5 protocol)
+GDP_DEFAULT_MIN = 480     # median real GDP 426 min, mean 477 (sample of 73, B5 protocol)
 FEATURES = ["gs_now", "gdp_now", "gdp_prop", "gdp_cover"]
 KINDS = ("GS", "GDP")
 

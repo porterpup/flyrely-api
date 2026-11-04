@@ -76,7 +76,7 @@ Same cutoff for origin and destination: the destination feature is "weather at t
 
 An advisory is visible from its send time (UTC). Per (airport, kind) the newest advisory sent at or before `c` is in
 force unless it is a cancellation (CNX); a later advisory of the same kind replaces it. Its program
-period is, for every advisory alike, from its send time for 180 min (GS) or 720 min (GDP); an earlier ending
+period is, for every advisory alike, from its send time for 90 min (GS) or 480 min (GDP); an earlier ending
 (cancellation, or a replacing advisory) takes precedence. (The detail-page period is not used; the sample check
 reports how well these defaults match the real periods.) Features:
 
@@ -116,3 +116,10 @@ Reported but not gating: AUC change, months improved out of 8, the A+B arm, and 
 excludes 0 on millions of flights can still be tiny; the report states the effect in plain language). If neither
 condition is met the verdict is "do not adopt". There is no re-tuning after seeing results: feature definitions and
 thresholds above are final, and any change is recorded as a new protocol.
+
+## Amendment 2 (before any evaluation): default periods
+
+A sample of 230 detail pages (157 GS, 73 GDP, random active advisories, `--sample 250`) showed the first defaults
+(GS 180 min, GDP 720 min) were far too long: real GS periods run a median 64 min from send (90th percentile 80, max 143),
+real GDPs a median 426 min (mean 477, 90th percentile 715). The defaults are changed to GS 90 min and GDP 480 min. This
+uses only the advisory text (no delay outcome), and no model has been trained.
