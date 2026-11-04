@@ -40,8 +40,10 @@ def _load_env():
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def cache_key(path, params):
+def cache_key(path, params, tag=None):
     s = path + "?" + "&".join(f"{k}={params[k]}" for k in sorted(params))
+    if tag:
+        s += "#" + str(tag)   # tag distinguishes repeated live snapshots; it is not sent to the API
     return hashlib.sha1(s.encode()).hexdigest()[:20], s
 
 
@@ -70,10 +72,10 @@ def last_remaining(group):
     return rem
 
 
-def credits_spent():
-    """Credits spent across all groups, from the ledger (observed cost, else expected cost)."""
+def credits_spent(group=None):
+    """Credits spent (all groups, or one endpoint group), from the ledger (observed cost, else expected cost)."""
     return sum((r.get("cost_observed") if r.get("cost_observed") is not None else r.get("expected_cost", 0))
-               for r in ledger_rows() if r.get("status") == 200 or r.get("status") == 404)
+               for r in ledger_rows() if r.get("status") in (200, 404) and (group is None or r.get("group") == group))
 
 
 class OpenSky:
@@ -99,9 +101,12 @@ class OpenSky:
         self._tok_exp = time.time() + int(j.get("expires_in", 1800))
         return self._tok
 
-    def get(self, path, params, expected_cost):
-        """Return (json, from_cache). Raises BudgetStop rather than dipping below the floor."""
-        key, desc = cache_key(path, params)
+    def get(self, path, params, expected_cost, cache_tag=None, group_cap=None):
+        """Return (json, from_cache). Raises BudgetStop rather than dipping below the floor.
+
+        group_cap: optional cap on credits spent in this endpoint group (used instead of the experiment-wide cap).
+        """
+        key, desc = cache_key(path, params, cache_tag)
         f = CACHE_DIR / f"{key}.json"
         if f.exists():
             return json.loads(f.read_text())["body"], True
@@ -111,7 +116,10 @@ class OpenSky:
             prev = DAILY
         if prev - expected_cost < self.floor:
             raise BudgetStop(f"{grp}: remaining={prev} cost={expected_cost} floor={self.floor}")
-        if credits_spent() + expected_cost > self.total_cap:
+        if group_cap is not None:
+            if credits_spent(grp) + expected_cost > group_cap:
+                raise BudgetStop(f"{grp} cap {group_cap} would be exceeded")
+        elif credits_spent() + expected_cost > self.total_cap:
             raise BudgetStop(f"experiment cap {self.total_cap} would be exceeded")
         req = urllib.request.Request(API + path + "?" + urllib.parse.urlencode(params),
                                      headers={"Authorization": "Bearer " + self._token()})

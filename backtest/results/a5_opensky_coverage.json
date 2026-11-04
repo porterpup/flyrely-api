@@ -819,10 +819,10 @@
     "note": "same-UTC-day rotations only; overnight aircraft are not linked in this sample"
   },
   "credits": {
-    "spent_total_this_experiment": 2255,
+    "spent_total_this_experiment": 2415,
     "flights_bucket_last_remaining": 1750,
-    "states_bucket_last_remaining": 3995,
-    "calls_live": 77,
+    "states_bucket_last_remaining": 3835,
+    "calls_live": 117,
     "observed_cost_per_call": [
       [
         "/flights",
@@ -849,7 +849,9 @@
         "/states/all",
         4
       ]
-    ]
+    ],
+    "states_bucket_spent_total": 165,
+    "flights_bucket_spent_total": 2250
   },
   "live_probes": {
     "departure_KATL_recent_10h_window": {
@@ -896,6 +898,400 @@
     "flights_departure_per_airport_poll": {
       "airports_polled_every_15min_16h": 1920,
       "note": "one airport polled every 15 min over 16h = 64 calls = 1920 credits; not scalable"
+    }
+  },
+  "state_vector_coverage": {
+    "n_snapshots": 40,
+    "span_utc": [
+      "2026-11-03T22:44:15",
+      "2026-11-04T02:38:15"
+    ],
+    "median_interval_s": 360.0,
+    "concurrent_airborne": {
+      "mainline": {
+        "expected_airborne_mean": 1526.8950000000002,
+        "observed_airborne_mean": 1693.85,
+        "ratio_observed_over_expected": 1.1093428166311368,
+        "ratio_known_callsigns_only": 0.9591032782214886
+      },
+      "regional": {
+        "expected_airborne_mean": 486.7,
+        "observed_airborne_mean": 502.075,
+        "ratio_observed_over_expected": 1.0315903020341073,
+        "ratio_known_callsigns_only": 0.9265461269776043
+      },
+      "all_bts_carriers": {
+        "expected_airborne_mean": 2013.595,
+        "observed_airborne_mean": 2195.925,
+        "ratio_observed_over_expected": 1.0905494898427937,
+        "ratio_known_callsigns_only": 0.9512339869735473
+      }
+    },
+    "concurrent_airborne_by_carrier": {
+      "AA": {
+        "ratio_known": 1.0818055583506068,
+        "expected_mean": 310.56875
+      },
+      "DL": {
+        "ratio_known": 0.8086564443790021,
+        "expected_mean": 314.10125
+      },
+      "UA": {
+        "ratio_known": 1.022904992222956,
+        "expected_mean": 293.33125
+      },
+      "WN": {
+        "ratio_known": 1.0704948326603243,
+        "expected_mean": 365.275
+      },
+      "AS": {
+        "ratio_known": 0.832085971982345,
+        "expected_mean": 97.70625
+      },
+      "B6": {
+        "ratio_known": 0.7006298422607435,
+        "expected_mean": 89.705
+      },
+      "F9": {
+        "ratio_known": 0.6656101426307449,
+        "expected_mean": 54.42375
+      },
+      "G4": {
+        "ratio_known": 1.695865451997197,
+        "expected_mean": 1.78375
+      },
+      "9E": {
+        "ratio_known": 0.8224067418515305,
+        "expected_mean": 50.43125
+      },
+      "OO": {
+        "ratio_known": 0.8388622090875508,
+        "expected_mean": 169.1875
+      },
+      "YX": {
+        "ratio_known": 1.0164515312579094,
+        "expected_mean": 74.08125
+      },
+      "MQ": {
+        "ratio_known": 0.9062017615545265,
+        "expected_mean": 68.83125
+      },
+      "OH": {
+        "ratio_known": 1.0728054981281778,
+        "expected_mean": 44.7425
+      },
+      "YV": {
+        "ratio_known": 1.211167911915061,
+        "expected_mean": 15.89375
+      },
+      "PT": {
+        "ratio_known": 0.9677193473846369,
+        "expected_mean": 17.85125
+      },
+      "QX": {
+        "ratio_known": 0.7723723723723723,
+        "expected_mean": 20.8125
+      },
+      "G7": {
+        "ratio_known": 1.3506976744186046,
+        "expected_mean": 13.4375
+      },
+      "C5": {
+        "ratio_known": 0.9732094040459267,
+        "expected_mean": 11.43125
+      }
+    },
+    "concurrent_ratio_by_utc_hour": {
+      "0": {
+        "snapshots": 10,
+        "expected_mean": 2029.9000000000003,
+        "ratio_known": 0.9482733139563524
+      },
+      "1": {
+        "snapshots": 10,
+        "expected_mean": 2032.83,
+        "ratio_known": 0.9512846622688568
+      },
+      "2": {
+        "snapshots": 7,
+        "expected_mean": 1810.2357142857143,
+        "ratio_known": 0.9264776094668019
+      },
+      "22": {
+        "snapshots": 3,
+        "expected_mean": 2076.116666666667,
+        "ratio_known": 0.9811587338540705
+      },
+      "23": {
+        "snapshots": 10,
+        "expected_mean": 2101.6500000000005,
+        "ratio_known": 0.9601027763899791
+      }
+    },
+    "flight_level_denominator": {
+      "flights": 1489,
+      "definition": "Aug 2026 domestic flights (same weekday) recurring on >=75% of those Augusts, re-timed to Nov local schedule; includes flights that may not operate today"
+    },
+    "flight_level": {
+      "overall": {
+        "flights": 1489,
+        "seen_anywhere_rate": 0.3458697112155809,
+        "seen_near_origin_rate_unconditional": 0.1584956346541303,
+        "seen_near_origin_given_seen_anywhere": 0.458252427184466,
+        "seen_near_origin_before_sched_dep_given_seen": 0.17281553398058253
+      },
+      "by_group": {
+        "mainline": {
+          "flights": 968,
+          "seen_anywhere_rate": 0.3605371900826446,
+          "seen_near_origin_rate_unconditional": 0.17355371900826447,
+          "seen_near_origin_given_seen_anywhere": 0.4813753581661891,
+          "seen_near_origin_before_sched_dep_given_seen": 0.17478510028653296
+        },
+        "regional": {
+          "flights": 521,
+          "seen_anywhere_rate": 0.31861804222648754,
+          "seen_near_origin_rate_unconditional": 0.13051823416506717,
+          "seen_near_origin_given_seen_anywhere": 0.40963855421686746,
+          "seen_near_origin_before_sched_dep_given_seen": 0.1686746987951807
+        }
+      },
+      "by_carrier": {
+        "9E": {
+          "flights": 55,
+          "seen_anywhere_rate": 0.509090909090909,
+          "seen_near_origin_rate_unconditional": 0.2545454545454545,
+          "seen_near_origin_given_seen_anywhere": 0.5,
+          "seen_near_origin_before_sched_dep_given_seen": 0.17857142857142858
+        },
+        "AA": {
+          "flights": 182,
+          "seen_anywhere_rate": 0.3241758241758242,
+          "seen_near_origin_rate_unconditional": 0.08791208791208792,
+          "seen_near_origin_given_seen_anywhere": 0.2711864406779661,
+          "seen_near_origin_before_sched_dep_given_seen": 0.0847457627118644
+        },
+        "B6": {
+          "flights": 53,
+          "seen_anywhere_rate": 0.4339622641509434,
+          "seen_near_origin_rate_unconditional": 0.1509433962264151,
+          "seen_near_origin_given_seen_anywhere": 0.34782608695652173,
+          "seen_near_origin_before_sched_dep_given_seen": 0.13043478260869565
+        },
+        "DL": {
+          "flights": 222,
+          "seen_anywhere_rate": 0.46846846846846846,
+          "seen_near_origin_rate_unconditional": 0.32432432432432434,
+          "seen_near_origin_given_seen_anywhere": 0.6923076923076923,
+          "seen_near_origin_before_sched_dep_given_seen": 0.28846153846153844
+        },
+        "MQ": {
+          "flights": 78,
+          "seen_anywhere_rate": 0.20512820512820512,
+          "seen_near_origin_rate_unconditional": 0.038461538461538464,
+          "seen_near_origin_given_seen_anywhere": 0.1875,
+          "seen_near_origin_before_sched_dep_given_seen": 0.125
+        },
+        "OH": {
+          "flights": 52,
+          "seen_anywhere_rate": 0.40384615384615385,
+          "seen_near_origin_rate_unconditional": 0.038461538461538464,
+          "seen_near_origin_given_seen_anywhere": 0.09523809523809523,
+          "seen_near_origin_before_sched_dep_given_seen": 0.09523809523809523
+        },
+        "OO": {
+          "flights": 185,
+          "seen_anywhere_rate": 0.31891891891891894,
+          "seen_near_origin_rate_unconditional": 0.14594594594594595,
+          "seen_near_origin_given_seen_anywhere": 0.4576271186440678,
+          "seen_near_origin_before_sched_dep_given_seen": 0.15254237288135594
+        },
+        "UA": {
+          "flights": 164,
+          "seen_anywhere_rate": 0.5548780487804879,
+          "seen_near_origin_rate_unconditional": 0.3719512195121951,
+          "seen_near_origin_given_seen_anywhere": 0.6703296703296703,
+          "seen_near_origin_before_sched_dep_given_seen": 0.2087912087912088
+        },
+        "WN": {
+          "flights": 301,
+          "seen_anywhere_rate": 0.18272425249169436,
+          "seen_near_origin_rate_unconditional": 0.0033222591362126247,
+          "seen_near_origin_given_seen_anywhere": 0.01818181818181818,
+          "seen_near_origin_before_sched_dep_given_seen": 0.01818181818181818
+        },
+        "YX": {
+          "flights": 60,
+          "seen_anywhere_rate": 0.3333333333333333,
+          "seen_near_origin_rate_unconditional": 0.21666666666666667,
+          "seen_near_origin_given_seen_anywhere": 0.65,
+          "seen_near_origin_before_sched_dep_given_seen": 0.4
+        }
+      },
+      "by_top15_origin": {
+        "ATL": {
+          "flights": 67,
+          "seen_anywhere_rate": 0.5074626865671642,
+          "seen_near_origin_rate_unconditional": 0.40298507462686567,
+          "seen_near_origin_given_seen_anywhere": 0.7941176470588235,
+          "seen_near_origin_before_sched_dep_given_seen": 0.38235294117647056
+        },
+        "CLT": {
+          "flights": 34,
+          "seen_anywhere_rate": 0.4411764705882353,
+          "seen_near_origin_rate_unconditional": 0.08823529411764706,
+          "seen_near_origin_given_seen_anywhere": 0.2,
+          "seen_near_origin_before_sched_dep_given_seen": 0.06666666666666667
+        },
+        "DEN": {
+          "flights": 52,
+          "seen_anywhere_rate": 0.4423076923076923,
+          "seen_near_origin_rate_unconditional": 0.34615384615384615,
+          "seen_near_origin_given_seen_anywhere": 0.782608695652174,
+          "seen_near_origin_before_sched_dep_given_seen": 0.13043478260869565
+        },
+        "DFW": {
+          "flights": 73,
+          "seen_anywhere_rate": 0.2876712328767123,
+          "seen_near_origin_rate_unconditional": 0.1095890410958904,
+          "seen_near_origin_given_seen_anywhere": 0.38095238095238093,
+          "seen_near_origin_before_sched_dep_given_seen": 0.14285714285714285
+        },
+        "IAH": {
+          "flights": 36,
+          "seen_anywhere_rate": 0.4444444444444444,
+          "seen_near_origin_rate_unconditional": 0.19444444444444445,
+          "seen_near_origin_given_seen_anywhere": 0.4375,
+          "seen_near_origin_before_sched_dep_given_seen": 0.0
+        },
+        "LAS": {
+          "flights": 31,
+          "seen_anywhere_rate": 0.3548387096774194,
+          "seen_near_origin_rate_unconditional": 0.0967741935483871,
+          "seen_near_origin_given_seen_anywhere": 0.2727272727272727,
+          "seen_near_origin_before_sched_dep_given_seen": 0.18181818181818182
+        },
+        "LAX": {
+          "flights": 33,
+          "seen_anywhere_rate": 0.36363636363636365,
+          "seen_near_origin_rate_unconditional": 0.15151515151515152,
+          "seen_near_origin_given_seen_anywhere": 0.4166666666666667,
+          "seen_near_origin_before_sched_dep_given_seen": 0.0
+        },
+        "LGA": {
+          "flights": 38,
+          "seen_anywhere_rate": 0.5789473684210527,
+          "seen_near_origin_rate_unconditional": 0.47368421052631576,
+          "seen_near_origin_given_seen_anywhere": 0.8181818181818182,
+          "seen_near_origin_before_sched_dep_given_seen": 0.5909090909090909
+        },
+        "MCO": {
+          "flights": 34,
+          "seen_anywhere_rate": 0.23529411764705882,
+          "seen_near_origin_rate_unconditional": 0.058823529411764705,
+          "seen_near_origin_given_seen_anywhere": 0.25,
+          "seen_near_origin_before_sched_dep_given_seen": 0.125
+        },
+        "MDW": {
+          "flights": 31,
+          "seen_anywhere_rate": 0.16129032258064516,
+          "seen_near_origin_rate_unconditional": 0.0,
+          "seen_near_origin_given_seen_anywhere": 0.0,
+          "seen_near_origin_before_sched_dep_given_seen": 0.0
+        },
+        "MSP": {
+          "flights": 31,
+          "seen_anywhere_rate": 0.5806451612903226,
+          "seen_near_origin_rate_unconditional": 0.3870967741935484,
+          "seen_near_origin_given_seen_anywhere": 0.6666666666666666,
+          "seen_near_origin_before_sched_dep_given_seen": 0.4444444444444444
+        },
+        "ORD": {
+          "flights": 100,
+          "seen_anywhere_rate": 0.41,
+          "seen_near_origin_rate_unconditional": 0.18,
+          "seen_near_origin_given_seen_anywhere": 0.43902439024390244,
+          "seen_near_origin_before_sched_dep_given_seen": 0.07317073170731707
+        },
+        "PHX": {
+          "flights": 37,
+          "seen_anywhere_rate": 0.2972972972972973,
+          "seen_near_origin_rate_unconditional": 0.08108108108108109,
+          "seen_near_origin_given_seen_anywhere": 0.2727272727272727,
+          "seen_near_origin_before_sched_dep_given_seen": 0.18181818181818182
+        },
+        "SEA": {
+          "flights": 40,
+          "seen_anywhere_rate": 0.325,
+          "seen_near_origin_rate_unconditional": 0.2,
+          "seen_near_origin_given_seen_anywhere": 0.6153846153846154,
+          "seen_near_origin_before_sched_dep_given_seen": 0.23076923076923078
+        },
+        "SFO": {
+          "flights": 30,
+          "seen_anywhere_rate": 0.26666666666666666,
+          "seen_near_origin_rate_unconditional": 0.1,
+          "seen_near_origin_given_seen_anywhere": 0.375,
+          "seen_near_origin_before_sched_dep_given_seen": 0.125
+        }
+      },
+      "by_local_dep_hour": {
+        "15": {
+          "flights": 106,
+          "seen_anywhere_rate": 0.24528301886792453,
+          "seen_near_origin_rate_unconditional": 0.08490566037735849,
+          "seen_near_origin_given_seen_anywhere": 0.34615384615384615,
+          "seen_near_origin_before_sched_dep_given_seen": 0.15384615384615385
+        },
+        "16": {
+          "flights": 203,
+          "seen_anywhere_rate": 0.3251231527093596,
+          "seen_near_origin_rate_unconditional": 0.14285714285714285,
+          "seen_near_origin_given_seen_anywhere": 0.4393939393939394,
+          "seen_near_origin_before_sched_dep_given_seen": 0.12121212121212122
+        },
+        "17": {
+          "flights": 332,
+          "seen_anywhere_rate": 0.3463855421686747,
+          "seen_near_origin_rate_unconditional": 0.1686746987951807,
+          "seen_near_origin_given_seen_anywhere": 0.48695652173913045,
+          "seen_near_origin_before_sched_dep_given_seen": 0.1565217391304348
+        },
+        "18": {
+          "flights": 601,
+          "seen_anywhere_rate": 0.36605657237936773,
+          "seen_near_origin_rate_unconditional": 0.16971713810316139,
+          "seen_near_origin_given_seen_anywhere": 0.4636363636363636,
+          "seen_near_origin_before_sched_dep_given_seen": 0.2
+        },
+        "19": {
+          "flights": 247,
+          "seen_anywhere_rate": 0.3562753036437247,
+          "seen_near_origin_rate_unconditional": 0.16194331983805668,
+          "seen_near_origin_given_seen_anywhere": 0.45454545454545453,
+          "seen_near_origin_before_sched_dep_given_seen": 0.17045454545454544
+        }
+      },
+      "first_near_origin_minus_sched_dep_min": {
+        "median": 4.316666666666666,
+        "p10": -21.7,
+        "p90": 40.28333333333333
+      }
+    },
+    "latency_seconds": {
+      "snapshot_time_minus_time_position": {
+        "median": 1.0,
+        "p90": 1.0,
+        "p99": 219.0
+      },
+      "snapshot_time_minus_last_contact": {
+        "median": 0.0,
+        "p90": 1.0,
+        "p99": 206.0
+      },
+      "request_time_minus_snapshot_time": {
+        "median": 3.0
+      }
     }
   }
 }

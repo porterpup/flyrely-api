@@ -1,9 +1,11 @@
 """Pure helpers in backtest/opensky_coverage.py: callsign mapping, N-number -> icao24, matching math."""
 
+import json
 import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backtest"))
@@ -45,16 +47,50 @@ def test_stats_helpers():
     assert p["precision"] == 0.5 and p["recall"] == 0.5
 
 
-def test_budget_guard_and_cache(tmp_path, monkeypatch):
+def _no_network(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("network call attempted")
+    monkeypatch.setattr(oc.urllib.request, "urlopen", boom)
+
+
+def _ledger(tmp_path, monkeypatch, rows):
     monkeypatch.setattr(oc, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(oc, "LEDGER", tmp_path / "ledger.jsonl")
-    (tmp_path / "ledger.jsonl").write_text('{"group": "/flights", "status": 200, "remaining": 1510, "cost_observed": 30}\n')
-    c = oc.OpenSky()
-    try:
-        c.get("/flights/all", {"begin": 1, "end": 2}, 30)  # 1510-30 < 1500 floor -> must refuse before any network call
-        assert False, "expected BudgetStop"
-    except oc.BudgetStop:
-        pass
+    (tmp_path / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def test_budget_floor_refuses_before_network(tmp_path, monkeypatch):
+    _no_network(monkeypatch)
+    _ledger(tmp_path, monkeypatch, [{"group": "/flights", "status": 200, "remaining": 1510, "cost_observed": 30}])
+    with pytest.raises(oc.BudgetStop):   # 1510-30 < 1500 floor
+        oc.OpenSky().get("/flights/all", {"begin": 1, "end": 2}, 30)
+
+
+def test_total_cap_refuses_before_network(tmp_path, monkeypatch):
+    _no_network(monkeypatch)
+    _ledger(tmp_path, monkeypatch, [{"group": "/flights", "status": 200, "remaining": 3000, "cost_observed": 2490}])
+    with pytest.raises(oc.BudgetStop):   # 2490 + 30 > 2500 experiment cap
+        oc.OpenSky().get("/flights/all", {"begin": 1, "end": 2}, 30)
+
+
+def test_group_cap_is_per_group(tmp_path, monkeypatch):
+    _no_network(monkeypatch)
+    _ledger(tmp_path, monkeypatch, [{"group": "/flights", "status": 200, "remaining": 1750, "cost_observed": 2250},
+                                    {"group": "/states", "status": 200, "remaining": 3000, "cost_observed": 598}])
+    with pytest.raises(oc.BudgetStop):   # /states spent 598 + 4 > 600 cap
+        oc.OpenSky().get("/states/all", {"lamin": 24}, 4, cache_tag="t", group_cap=600)
+
+
+def test_cache_hit_costs_nothing(tmp_path, monkeypatch):
+    _no_network(monkeypatch)
+    _ledger(tmp_path, monkeypatch, [])
     key, _ = oc.cache_key("/flights/all", {"begin": 1, "end": 2})
     (tmp_path / f"{key}.json").write_text('{"body": [1]}')
-    assert c.get("/flights/all", {"begin": 1, "end": 2}, 30) == ([1], True)  # cache hit costs nothing
+    assert oc.OpenSky().get("/flights/all", {"begin": 1, "end": 2}, 30) == ([1], True)
+    k2, _ = oc.cache_key("/states/all", {"a": 1}, "poll-1")
+    assert k2 != oc.cache_key("/states/all", {"a": 1}, "poll-2")[0]   # snapshots with different tags do not collide
+
+
+def test_haversine():
+    assert abs(oco.haversine_km(33.6367, -84.4281, 33.6367, -84.4281)) < 1e-6
+    assert 1200 < float(oco.haversine_km(33.64, -84.43, 40.64, -73.78)) < 1250   # ATL-JFK ~1,222 km

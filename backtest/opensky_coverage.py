@@ -4,7 +4,9 @@
 Budgeted, cached and resumable:
   python backtest/opensky_coverage.py fetch     # pull /flights/all 2h windows (30 credits each), stops at the budget floor
   python backtest/opensky_coverage.py states    # one CONUS /states/all probe (4 credits)
+  python backtest/opensky_coverage.py poll 360 60   # CONUS /states/all snapshots (4 credits each, /states cap 600)
   python backtest/opensky_coverage.py analyze   # no network; writes backtest/results/a5_opensky_coverage.json
+  python backtest/opensky_coverage.py states-analyze   # no network; adds state_vector_coverage to that JSON (run after analyze)
 Raw responses are cached in data/opensky_cache/ (gitignored); reruns cost nothing.
 """
 import datetime as dt
@@ -166,6 +168,31 @@ def cmd_states():
     print("states cached" if cached else "states fetched", len(body.get("states") or []), "remaining", c.remaining)
 
 
+STATES_CAP = 600          # max credits in the /states bucket for this experiment (incl. the earlier 5-credit probes)
+CONUS = {"lamin": 24, "lamax": 50, "lomin": -125, "lomax": -66}   # 4 credits per call (>400 sq deg)
+
+
+def cmd_poll(interval_s=360, n_polls=60):
+    """Poll CONUS /states/all every interval_s seconds, caching each snapshot. Resumable: stops at the cap/floor."""
+    import time as _t
+    c = oc.OpenSky()
+    for i in range(n_polls):
+        t0 = _t.time()
+        tag = f"poll-{int(t0)}"
+        try:
+            body, _ = c.get("/states/all", CONUS, 4, cache_tag=tag, group_cap=STATES_CAP)
+        except oc.BudgetStop as ex:
+            print("STOP (budget):", ex, flush=True)
+            return
+        except Exception as ex:   # transient network error: log, keep going, never tight-loop
+            print("poll error:", type(ex).__name__, flush=True)
+            _t.sleep(60)
+            continue
+        print(f"poll {i + 1}/{n_polls} t={int(t0)} aircraft={len(body.get('states') or [])} remaining={c.remaining} "
+              f"states_spent={oc.credits_spent('/states')}", flush=True)
+        _t.sleep(max(1, interval_s - (_t.time() - t0)))
+
+
 # --------------------------------------------------------------------------- load
 def load_opensky():
     rows = []
@@ -193,7 +220,8 @@ def airport_ref(iatas):
     for _, r in a.iterrows():
         icao = r.icao_code if isinstance(r.icao_code, str) else (r.gps_code if isinstance(r.gps_code, str) else r.ident)
         tzn = tf.timezone_at(lat=float(r.latitude_deg), lng=float(r.longitude_deg))
-        ref[r.iata_code] = {"icao": icao, "tz": ZoneInfo(tzn) if tzn else None}
+        ref[r.iata_code] = {"icao": icao, "tz": ZoneInfo(tzn) if tzn else None,
+                            "lat": float(r.latitude_deg), "lon": float(r.longitude_deg)}
     return ref
 
 
@@ -429,7 +457,7 @@ def live_probe_summary():
             kind = req.split("?")[0].split("/")[-1]
             ts = pd.DataFrame(body) if body else pd.DataFrame()
             out[f"{kind}_KATL_recent_10h_window"] = {"n_flights": int(len(ts)), "share_missing_arrival_airport": (float(ts.estArrivalAirport.isna().mean()) if len(ts) else None)}
-        elif req.startswith("/states/all"):
+        elif req.startswith("/states/all") and "#poll" not in req:
             st = body.get("states") or []
             tag = "states_conus" if "lamin=24" in req else "states_ATL_2x2deg"
             cs = [x[1].strip() for x in st if x[1] and x[1].strip()]
@@ -451,6 +479,192 @@ def projection():
     }
 
 
+# --------------------------------------------------------------------------- state-vector coverage (live path)
+MAINLINE = ["AA", "DL", "UA", "WN", "AS", "B6", "F9", "G4"]
+ICAO_TO_IATA = {v: k for k, v in IATA_TO_ICAO.items()}
+NOV_DATES = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"]   # local dates whose schedules overlap the polling span
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    p = np.pi / 180
+    a = (np.sin((lat2 - lat1) * p / 2) ** 2 + np.cos(lat1 * p) * np.cos(lat2 * p) * np.sin((lon2 - lon1) * p / 2) ** 2)
+    return 12742 * np.arcsin(np.sqrt(a))
+
+
+def load_snapshots():
+    """Cached CONUS /states/all poll snapshots -> long DataFrame of airline-callsign state vectors, plus snapshot times."""
+    snaps, rows = [], []
+    for r in oc.ledger_rows():
+        if r.get("req", "").startswith("/states/all") and "#poll" in r["req"] and r.get("status") == 200:
+            tag = r["req"].split("#", 1)[1]
+            key, _ = oc.cache_key("/states/all", CONUS, tag)
+            f = oc.CACHE_DIR / f"{key}.json"
+            if not f.exists():
+                continue
+            body = json.loads(f.read_text())["body"]
+            t = body["time"]
+            snaps.append(t)
+            call_epoch = int(tag.split("-")[1])
+            for x in body.get("states") or []:
+                cs = norm_callsign(x[1])
+                rows.append((t, call_epoch, x[0], cs, x[3], x[4], x[5], x[6], x[7], bool(x[8])))
+    d = pd.DataFrame(rows, columns=["t", "call_t", "icao24", "cs", "tpos", "lcontact", "lon", "lat", "alt", "ground"])
+    d["pre"] = d.cs.str[:3]
+    d["is_airline"] = d.pre.isin(ICAO_TO_IATA) & d.cs.str[3:].str.fullmatch(r"\d{1,4}[A-Z]?").fillna(False)
+    return d, sorted(snaps)
+
+
+def bts_schedule_for_nov(ref):
+    """Aug BTS flights re-timed onto the Nov local dates with the same weekday (local schedule time + Nov UTC offset)."""
+    full, _ = load_bts()
+    full = full[(full.Cancelled == 0) & (full.Diverted == 0)].dropna(subset=["DepDelay", "TaxiOut", "AirTime", "CRSDepTime"]).copy()
+    full = full[full.Origin.isin(ref) & full.Dest.isin(ref)]
+    conus = lambda a: 24 <= ref[a]["lat"] <= 50 and -125 <= ref[a]["lon"] <= -66
+    ok = {a for a in ref if conus(a) and ref[a]["tz"] is not None}
+    full = full[full.Origin.isin(ok) & full.Dest.isin(ok)].copy()
+    off = {a: ref[a]["tz"].utcoffset(dt.datetime(2026, 11, 3, 12)).total_seconds() for a in ok}
+    full["o_off"] = full.Origin.map(off)
+    full["dow"] = full.FlightDate.dt.dayofweek
+    full["op"] = full.IATA_Code_Operating_Airline
+    full["cs_op"] = [f"{IATA_TO_ICAO.get(o, '???')}{int(n)}" for o, n in zip(full.op, full.Flight_Number_Operating_Airline)]
+    full["cs_mk"] = [f"{IATA_TO_ICAO.get(o, '???')}{int(n)}" for o, n in zip(full.Marketing_Airline_Network, full.Flight_Number_Marketing_Airline)]
+    full["dep_min"] = [hhmm_to_minutes(int(v) % 2400) for v in full.CRSDepTime]
+    return full, ok
+
+
+def retime(full, ref):
+    """Return one frame per Nov local date L: Aug flights with weekday(L), with UTC sdep/woff/won on L, and n source dates."""
+    out = []
+    for L in NOV_DATES:
+        Ld = pd.Timestamp(L)
+        src = full[full.dow == Ld.dayofweek]
+        n_src = src.FlightDate.nunique()
+        sd = (Ld.timestamp() + src.dep_min.values * 60 - src.o_off.values)   # local clock on L -> UTC epoch
+        f = src.assign(sdep=sd, woff=sd + (src.DepDelay + src.TaxiOut).values * 60)
+        f["won"] = f.woff + f.AirTime * 60
+        f["n_src"] = n_src
+        f["L"] = L
+        out.append(f)
+    return pd.concat(out, ignore_index=True)
+
+
+def analyze_states(ref=None):
+    obs, snaps = load_snapshots()
+    if len(snaps) < 3:
+        return {"error": "too few snapshots"}
+    ref = ref or airport_ref(set(pd.read_csv(ROOT / "data" / "ref" / "airports.csv", dtype=str, usecols=["iata_code"]).iata_code.dropna()))
+    full, ok = bts_schedule_for_nov(ref)
+    fl = retime(full, ref)
+    res = {"n_snapshots": len(snaps), "span_utc": [pd.Timestamp(snaps[0], unit="s").isoformat(), pd.Timestamp(snaps[-1], unit="s").isoformat()],
+           "median_interval_s": float(np.median(np.diff(snaps)))}
+    known = set(full.cs_op) | set(full.cs_mk)
+    air = obs[obs.is_airline & ~obs.ground & obs.lat.notna()].copy()
+    air["op"] = air.pre.map(ICAO_TO_IATA)
+    air["known"] = air.cs.isin(known)
+    air["grp"] = np.where(air.op.isin(MAINLINE), "mainline", "regional")
+
+    # ---- (a) concurrent airborne: observed airline-callsign aircraft per snapshot vs BTS-implied expected airborne
+    snaps_a = np.array(snaps, float)
+    exp_by_op = {}
+    for op, g in fl.groupby("op"):
+        cnt = np.zeros(len(snaps_a))
+        for L, gg in g.groupby("L"):
+            w, o = np.sort(gg.woff.values), np.sort(gg.won.values)
+            cnt += (np.searchsorted(w, snaps_a, side="right") - np.searchsorted(o, snaps_a, side="left")) / gg.n_src.iloc[0]
+        exp_by_op[op] = cnt
+    obs_cnt = air.groupby(["t", "op"]).size().unstack(fill_value=0).reindex(snaps).fillna(0)
+    known_cnt = air[air.known].groupby(["t", "op"]).size().unstack(fill_value=0).reindex(snaps).fillna(0)
+    conc = {}
+    for grp, ops in (("mainline", MAINLINE), ("regional", REGIONALS), ("all_bts_carriers", MAINLINE + REGIONALS)):
+        e = sum(exp_by_op.get(o, 0) for o in ops)
+        ob = sum(obs_cnt[o].values for o in ops if o in obs_cnt)
+        kn = sum(known_cnt[o].values for o in ops if o in known_cnt)
+        conc[grp] = {"expected_airborne_mean": float(np.mean(e)), "observed_airborne_mean": float(np.mean(ob)),
+                     "ratio_observed_over_expected": float(np.sum(ob) / np.sum(e)) if np.sum(e) else None,
+                     "ratio_known_callsigns_only": float(np.sum(kn) / np.sum(e)) if np.sum(e) else None}
+    res["concurrent_airborne"] = conc
+    res["concurrent_airborne_by_carrier"] = {o: {"ratio_known": float(known_cnt[o].sum() / exp_by_op[o].sum()) if o in known_cnt and exp_by_op[o].sum() else None,
+                                                  "expected_mean": float(exp_by_op[o].mean())} for o in MAINLINE + REGIONALS if o in exp_by_op}
+    hr = pd.Series(pd.to_datetime(snaps_a, unit="s").hour)
+    tot_e = sum(exp_by_op.get(o, 0) for o in MAINLINE + REGIONALS)
+    tot_k = sum(known_cnt[o].values for o in MAINLINE + REGIONALS if o in known_cnt)
+    res["concurrent_ratio_by_utc_hour"] = {int(h): {"snapshots": int((hr == h).sum()), "expected_mean": float(tot_e[(hr == h).values].mean()),
+                                                     "ratio_known": float(tot_k[(hr == h).values].sum() / tot_e[(hr == h).values].sum())} for h in sorted(hr.unique())}
+
+    # ---- (b) per-flight: recurring Aug flights re-timed to Nov; seen near origin around scheduled departure?
+    key = ["op", "cs_op", "cs_mk", "Origin", "Dest", "dep_min", "L"]
+    cnt = fl.groupby(key).agg(n=("sdep", "size"), sdep=("sdep", "median"), n_src=("n_src", "first")).reset_index()
+    cnt = cnt[cnt.n >= 0.75 * cnt.n_src]    # schedule-stable flights only (present on >=75% of same-weekday Augusts)
+    t0, t1 = snaps[0], snaps[-1]
+    cnt = cnt[(cnt.sdep >= t0 + 1800) & (cnt.sdep <= t1 - 7200)].reset_index(drop=True)
+    cnt["fid"] = cnt.index
+    res["flight_level_denominator"] = {"flights": int(len(cnt)),
+                                       "definition": "Aug 2026 domestic flights (same weekday) recurring on >=75% of those Augusts, re-timed to Nov local schedule; includes flights that may not operate today"}
+    ex = cnt.melt(id_vars=["fid", "sdep", "Origin"], value_vars=["cs_op", "cs_mk"], value_name="cs").drop_duplicates(["fid", "cs"])
+    m = ex.merge(air[["t", "cs", "lat", "lon", "ground"]], on="cs", how="inner")
+    m["dt"] = m.t - m.sdep
+    anyw = m[(m.dt >= -1800) & (m.dt <= 7200)]
+    seen_any = set(anyw.fid)
+    olat = np.array([ref[a]["lat"] for a in m.Origin], float)
+    olon = np.array([ref[a]["lon"] for a in m.Origin], float)
+    m["d_km"] = haversine_km(m.lat.values, m.lon.values, olat, olon)
+    near = m[(m.dt >= -1800) & (m.dt <= 3600) & (m.d_km <= 25)]
+    seen_near = set(near.fid)
+    first_near = near.groupby("fid").dt.min()
+    # (airline-callsign set above excludes on_ground rows because `air` is airborne only; ground sightings need `obs`)
+    og = obs[obs.is_airline & obs.lat.notna()][["t", "cs", "lat", "lon", "ground"]]
+    m2 = ex.merge(og, on="cs", how="inner")
+    m2["dt"] = m2.t - m2.sdep
+    m2["d_km"] = haversine_km(m2.lat.values, m2.lon.values, np.array([ref[a]["lat"] for a in m2.Origin], float),
+                           np.array([ref[a]["lon"] for a in m2.Origin], float))
+    near2 = m2[(m2.dt >= -1800) & (m2.dt <= 3600) & (m2.d_km <= 25)]
+    seen_near_any_state = set(near2.fid)
+    pre_dep = set(near2[(near2.dt <= 0)].fid)
+    first2 = near2.groupby("fid").dt.min()
+    cnt["seen_anywhere"] = cnt.fid.isin(seen_any | seen_near_any_state)
+    cnt["seen_near_origin"] = cnt.fid.isin(seen_near_any_state)
+    cnt["seen_before_dep_near_origin"] = cnt.fid.isin(pre_dep)
+    cnt["grp"] = np.where(cnt.op.isin(MAINLINE), "mainline", "regional")
+
+    def summ(g):
+        sa = g.seen_anywhere.sum()
+        return {"flights": int(len(g)), "seen_anywhere_rate": float(g.seen_anywhere.mean()),
+                "seen_near_origin_rate_unconditional": float(g.seen_near_origin.mean()),
+                "seen_near_origin_given_seen_anywhere": float(g.seen_near_origin.sum() / sa) if sa else None,
+                "seen_near_origin_before_sched_dep_given_seen": float(g.seen_before_dep_near_origin.sum() / sa) if sa else None}
+    res["flight_level"] = {"overall": summ(cnt), "by_group": {k: summ(g) for k, g in cnt.groupby("grp")},
+                           "by_carrier": {k: summ(g) for k, g in cnt.groupby("op") if len(g) >= 50}}
+    top = cnt.Origin.value_counts().head(15).index
+    res["flight_level"]["by_top15_origin"] = {k: summ(g) for k, g in cnt[cnt.Origin.isin(top)].groupby("Origin")}
+    cnt["local_hr"] = [int(((pd.Timestamp(t, unit="s", tz="UTC") + pd.Timedelta(seconds=ref[o]["tz"].utcoffset(dt.datetime(2026, 11, 3, 12)).total_seconds())).hour)) for t, o in zip(cnt.sdep, cnt.Origin)]
+    res["flight_level"]["by_local_dep_hour"] = {int(k): summ(g) for k, g in cnt.groupby("local_hr")}
+    # departure-time detection lag available to a poller: first sighting near origin relative to scheduled departure
+    fl_first = first2.reindex(cnt.fid[cnt.seen_near_origin]).dropna() / 60
+    res["flight_level"]["first_near_origin_minus_sched_dep_min"] = {"median": float(fl_first.median()), "p10": float(fl_first.quantile(.1)), "p90": float(fl_first.quantile(.9))}
+
+    # ---- (c) latency of the state vectors themselves
+    a = obs[obs.is_airline & ~obs.ground & obs.tpos.notna()]
+    pos_age = (a.t - a.tpos)
+    con_age = (a.t - a.lcontact)
+    res["latency_seconds"] = {
+        "snapshot_time_minus_time_position": {"median": float(pos_age.median()), "p90": float(pos_age.quantile(.9)), "p99": float(pos_age.quantile(.99))},
+        "snapshot_time_minus_last_contact": {"median": float(con_age.median()), "p90": float(con_age.quantile(.9)), "p99": float(con_age.quantile(.99))},
+        "request_time_minus_snapshot_time": {"median": float((obs.drop_duplicates("t").call_t - obs.drop_duplicates("t").t).median())}}
+    return res
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "analyze"
-    {"fetch": cmd_fetch, "states": cmd_states, "analyze": analyze}[cmd]()
+    if cmd == "states-analyze":
+        out = analyze_states()
+        r = json.loads(RESULT.read_text()) if RESULT.exists() else {}
+        r["state_vector_coverage"] = out
+        r.setdefault("credits", {})["states_bucket_spent_total"] = oc.credits_spent("/states")
+        r["credits"]["flights_bucket_spent_total"] = oc.credits_spent("/flights")
+        r["credits"]["spent_total_this_experiment"] = oc.credits_spent()
+        RESULT.write_text(json.dumps(r, indent=2, default=float))
+        print(json.dumps(out, indent=1, default=float)[:6000])
+    elif cmd == "poll":
+        cmd_poll(int(sys.argv[2]) if len(sys.argv) > 2 else 360, int(sys.argv[3]) if len(sys.argv) > 3 else 60)
+    else:
+        {"fetch": cmd_fetch, "states": cmd_states, "analyze": analyze}[cmd]()
