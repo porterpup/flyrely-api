@@ -1,0 +1,4 @@
+-r requirements.txt
+# FAA SWIM SCDS consumers (swim/). Not needed by the API image.
+solace-pubsubplus==1.11.0
+certifi
