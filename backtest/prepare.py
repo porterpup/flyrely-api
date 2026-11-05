@@ -3,6 +3,8 @@ Convert BTS monthly zips into slim per-month Parquet.
 
     python backtest/prepare.py                      # Reporting Carrier zips (data/bts/raw) -> data/bts/parquet
     python backtest/prepare.py --source marketing   # Marketing Carrier zips (data/bts/marketing) -> data/bts/parquet_v2
+    FLYRELY_HOLDOUT_UNLOCK=2026-09 python backtest/prepare.py --source marketing --holdout 2026-09
+                                                    # the one holdout zip -> data/holdout/2026-09/bts/2026-09.parquet
 
 The Reporting Carrier file omits six operating carriers (9E, PT, QX, G7, C5, YV; ~9.6% of
 flights). The Marketing Carrier file has all of them, so the backtests read the --source
@@ -16,6 +18,9 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import holdout  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "bts"
 
@@ -66,9 +71,17 @@ def _read(zip_path: Path, columns: dict) -> pd.DataFrame:
     return df.rename(columns=stripped)
 
 
-def convert(zip_path: Path, out_dir: Path, source: str = "reporting", force: bool = False) -> Path:
+def convert(zip_path: Path, out_dir: Path, source: str = "reporting", force: bool = False,
+            holdout_month: str = None) -> Path:
+    """`holdout_month`: the one unlocked month (checked by the caller); only that month's zip converts, and only
+    rows of that month are written."""
     y, m = map(int, re.search(r"_(\d{4})_(\d{1,2})\.zip$", zip_path.name).groups())
-    out = out_dir / f"{y}-{m:02d}.parquet"
+    ym = f"{y}-{m:02d}"
+    if holdout_month is None and holdout.is_locked_month(ym):
+        raise SystemExit(f"refusing {zip_path.name}: {ym} is in the protected holdout (use --holdout {ym})")
+    if holdout_month is not None and ym != holdout_month:
+        raise SystemExit(f"refusing {zip_path.name}: --holdout {holdout_month} converts that month only")
+    out = out_dir / f"{ym}.parquet"
     if out.exists() and not force:
         return out
     if source == "marketing":
@@ -79,6 +92,8 @@ def convert(zip_path: Path, out_dir: Path, source: str = "reporting", force: boo
         if "Marketing_Airline_Network" not in df:
             df["Marketing_Airline_Network"] = df["Reporting_Airline"]
     df["FlightDate"] = pd.to_datetime(df["FlightDate"])
+    if holdout_month is not None:
+        holdout.refuse_rows_outside(df, holdout_month)
     out_dir.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
     return out
@@ -88,10 +103,28 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", choices=["reporting", "marketing"], default="reporting")
     ap.add_argument("--force", action="store_true", help="rebuild months that already exist")
+    ap.add_argument("--holdout", metavar="YYYY-MM", help="convert only that protected month's zip, from and to "
+                    "data/holdout/YYYY-MM/bts/ (needs FLYRELY_HOLDOUT_UNLOCK=YYYY-MM and --source marketing)")
     args = ap.parse_args(argv)
+    if args.holdout:
+        if args.source != "marketing":
+            sys.exit("--holdout works with --source marketing only")
+        month = holdout.require_unlock(args.holdout)
+        d = holdout.holdout_dir(month) / "bts"
+        zips = [z for z in sorted(d.glob("*.zip")) if holdout.zip_month(z.name) == month]
+        if not zips:
+            sys.exit(f"no {month} zip in {d} - run fetch_bts.sh --holdout {month} first")
+        for zp in zips:
+            p = convert(zp, d, "marketing", args.force, holdout_month=month)
+            print(p.name, len(pd.read_parquet(p, columns=["Origin"])))
+        return
     src, out_dir = (ROOT / "marketing", ROOT / "parquet_v2") if args.source == "marketing" \
         else (ROOT / "raw", ROOT / "parquet")
     zips = sorted(src.glob("*.zip"))
+    locked = [z for z in zips if holdout.is_locked_month(holdout.zip_month(z.name) or "0000-00")]
+    if locked:
+        print("skipping protected holdout zips (convert them with --holdout):", [z.name for z in locked])
+        zips = [z for z in zips if z not in locked]
     if not zips:
         sys.exit(f"no zips in {src} — run backtest/fetch_bts.sh first")
     for zp in zips:
