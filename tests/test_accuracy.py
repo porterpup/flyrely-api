@@ -23,15 +23,15 @@ from prediction_log import PredictionStore, build_record  # noqa: E402
 NOW = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
 
 
-def _pred(store, flight_no, origin, dep, p, op="DL", mk="DL", op_no=None, horizon="booking", model="m1"):
+def _pred(store, flight_no, origin, dep, p, op="DL", mk="DL", op_no=None, horizon="booking", model="m1", minutes=5000, ts=None):
     rec = build_record(
         flight_id=f"{mk}{flight_no}", origin=origin, dest="LAX", sched_dep_local=dep,
         marketing_airline=mk, marketing_number=str(flight_no), operating_airline=op,
         operating_number=str(op_no if op_no is not None else flight_no), delay_probability=p,
         risk_level="low", model_version=model, features={}, weather_available=True, horizon=horizon,
-        now=NOW)
+        now=ts or NOW)
     rec["sched_dep_utc"] = None
-    rec["minutes_to_departure"] = None
+    rec["minutes_to_departure"] = minutes
     store.write(rec)
 
 
@@ -145,15 +145,16 @@ def test_end_to_end_report_and_alerts(store, tmp_path, monkeypatch, caplog):
     out = tmp_path / "out"
     args = Namespace(bts_dir=str(bts), out_dir=str(out), sqlite=None, since=None, no_load=False, alert=True)
     with caplog.at_level(logging.INFO):
-        rep = score_live.run(args, store=store, now=datetime(2026, 8, 25, tzinfo=timezone.utc))
+        rep = score_live.run(args, store=store, now=datetime(2026, 11, 1, tzinfo=timezone.utc))
     assert rep["counts"]["predictions"] == 61 and rep["counts"]["unmatched"] == 1
     assert rep["counts"]["scored"] == 60
     assert {g["horizon"] for g in rep["by_model_horizon"]} == {"booking", "t-3h"}
     assert len({w["week"] for w in rep["by_week"]}) >= 2
     assert rep["unmatched_sample"][0]["flight_id"] == "DL5"
-    md = (out / "accuracy_2026-08-25.md").read_text()
+    md = (out / "accuracy_2026-11-01.md").read_text()
     assert "Reliability" in md and "Unmatched predictions" in md
-    assert json.loads((out / "accuracy_2026-08-25.json").read_text())["counts"]["scored"] == 60
+    assert json.loads((out / "accuracy_2026-11-01.json").read_text())["counts"]["scored"] == 60
+    assert rep["recent"] and rep["recent_anchor"].startswith("2026-08-1")   # anchored at newest scored flight, not now
     assert any("Calibration drift" in a for a in rep["alerts"])
     assert any("no channel configured" in r.message for r in caplog.records)
 
@@ -189,7 +190,7 @@ def test_alert_channels(monkeypatch):
         def __init__(self, host, port, timeout=0): sent["host"] = (host, port)
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def starttls(self): sent["tls"] = True
+        def starttls(self, context=None): sent["tls"] = context is not None and context.verify_mode == alerts.ssl.CERT_REQUIRED
         def login(self, u, p): sent["login"] = u
         def send_message(self, msg): sent["to"] = msg["To"]
 
@@ -201,6 +202,81 @@ def test_alert_channels(monkeypatch):
     assert posted[0].full_url == "https://discord.example/hook"
     assert posted[1].full_url == "https://ntfy.sh/t"
     assert sent["tls"] and sent["to"] == "a@b.c" and sent["login"] == "u"
+
+
+def test_dedupe_buckets_and_after_departure(store):
+    dep = datetime(2026, 8, 3, 9, 30)
+    _pred(store, 100, "ATL", dep, 0.2, minutes=5000, ts=datetime(2026, 7, 30, tzinfo=timezone.utc))
+    _pred(store, 100, "ATL", dep, 0.3, minutes=4000, ts=datetime(2026, 7, 31, tzinfo=timezone.utc))  # same bucket, later
+    _pred(store, 100, "ATL", dep, 0.4, minutes=120, ts=datetime(2026, 8, 3, tzinfo=timezone.utc))      # t-3h
+    _pred(store, 100, "ATL", dep, 0.9, minutes=-10, ts=datetime(2026, 8, 3, 10, tzinfo=timezone.utc))  # after departure
+    _pred(store, 100, "ATL", dep, 0.5, minutes=None)                                                  # unknown lead
+    p, stats = outcomes.dedupe_predictions(outcomes.read_predictions(store))
+    assert stats == {"raw": 5, "after_departure": 1, "deduped": 3}
+    got = dict(zip(p["horizon"], p["delay_probability"]))
+    assert got == {"booking": 0.3, "t-3h": 0.4, "unknown-lead": 0.5}
+
+
+def test_duplicate_bts_key_picks_closest_and_flags_mismatch(store, tmp_path):
+    _pred(store, 100, "ATL", datetime(2026, 8, 3, 18, 0), 0.3)
+    _pred(store, 101, "ATL", datetime(2026, 8, 3, 18, 0), 0.3)   # BTS has 06:00 only -> UTC/local style mismatch
+    bts = _bts(tmp_path, [
+        ["2026-08-03", "DL", "DL", 100, 100, "ATL", "LAX", 600, 0.0, 0.0, 0.0],
+        ["2026-08-03", "DL", "DL", 100, 100, "ATL", "LAX", 1810, 45.0, 0.0, 0.0],
+        ["2026-08-03", "DL", "DL", 101, 101, "ATL", "LAX", 600, 45.0, 0.0, 0.0]])
+    preds = outcomes.read_predictions(store)
+    rows = outcomes.load_bts_outcomes(preds, bts, now=NOW)
+    assert len(rows) == 3                      # both legs of DL100 kept
+    m = outcomes.match_predictions(preds, rows).set_index("flight_id")
+    assert m.loc["DL100", "label_d15"] == 1 and m.loc["DL100", "match_status"] == "matched"
+    assert m.loc["DL101", "match_status"] == "time_mismatch" and not m.loc["DL101", "matched"]
+
+
+def test_ambiguous_tie_not_scored(store, tmp_path):
+    _pred(store, 100, "ATL", datetime(2026, 8, 3, 12, 0), 0.3)
+    bts = _bts(tmp_path, [
+        ["2026-08-03", "DL", "DL", 100, 100, "ATL", "LAX", 1100, 0.0, 0.0, 0.0],
+        ["2026-08-03", "DL", "DL", 100, 100, "ATL", "LAX", 1300, 45.0, 0.0, 0.0]])
+    preds = outcomes.read_predictions(store)
+    m = outcomes.match_predictions(preds, outcomes.load_bts_outcomes(preds, bts, now=NOW))
+    assert m.iloc[0]["match_status"] == "ambiguous"
+
+
+def test_nan_delay_is_on_time_and_null_marketing(store, tmp_path):
+    _pred(store, 100, "ATL", datetime(2026, 8, 3, 9, 30), 0.3)
+    d = _bts(tmp_path, [["2026-08-03", "DL", None, 100, 100, "ATL", "LAX", 930, np.nan, 0.0, 0.0]])
+    rows = outcomes.load_bts_outcomes(outcomes.read_predictions(store), d, now=NOW)
+    assert rows.iloc[0]["label_d15"] == 0 and rows.iloc[0]["marketing_airline"] is None
+
+
+def test_read_predictions_missing_table(tmp_path):
+    s = PredictionStore(sqlite_path=str(tmp_path / "none.sqlite"), database_url="")
+    s.sqlite_path.parent.mkdir(exist_ok=True)
+    assert outcomes.read_predictions(s).empty
+
+
+def test_malformed_thresholds_fall_back(caplog):
+    rep = {"recent_days": 14, "recent": [{"model_version": "m", "horizon": "b", "n": 600, "ece": 0.2, "brier": 0.2}]}
+    msgs = alerts.evaluate(rep, 5, env={"FLYRELY_ALERT_ECE_MAX": "abc", "FLYRELY_ALERT_MIN_N": "x",
+                                         "FLYRELY_ALERT_BASELINE_BRIER": "nope"})
+    assert any("Calibration drift" in m for m in msgs)   # default 0.05 applied
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="needs TEST_DATABASE_URL (a throwaway Postgres)")
+def test_postgres_round_trip(tmp_path):
+    pg = PredictionStore(sqlite_path=str(tmp_path / "x.sqlite"), database_url=os.environ["TEST_DATABASE_URL"])
+    _pred(pg, 7777, "ATL", datetime(2026, 8, 3, 9, 30), 0.3, op="ZZ", mk="ZZ")
+    preds = outcomes.read_predictions(pg)
+    bts = _bts(tmp_path, [["2026-08-03", "ZZ", "ZZ", 7777, 7777, "ATL", "LAX", 930, 20.0, 0.0, 0.0]])
+    rows = outcomes.load_bts_outcomes(preds[preds["operating_airline"] == "ZZ"], bts, now=NOW)
+    ostore = outcomes.OutcomeStore(pg)
+    ostore.upsert(rows)
+    ostore.upsert(rows)  # idempotent
+    got = ostore.read()
+    got = got[got["carrier"] == "ZZ"]
+    assert len(got) == 1 and got.iloc[0]["label_d15"] == 1
+    m = outcomes.match_predictions(preds[preds["operating_airline"] == "ZZ"], got)
+    assert m["matched"].all()
 
 
 def test_alert_failure_never_raises(monkeypatch, caplog):

@@ -6,7 +6,14 @@
 
 Uses DATABASE_URL (Postgres) when set, else SQLite (FLYRELY_PREDICTION_DB). Needs no network.
 Scoring set: matched flights that were not cancelled (cancelled/diverted counts are reported separately),
-label = departure delay >= 15 min (the training label). Each prediction row counts once.
+label = departure delay >= 15 min (the training label).
+
+De-duplication rule: /predict logs every call, so predictions are first bucketed by lead time
+(minutes_to_departure: <=90 t-1h, <=300 t-3h, <=1800 t-1d, else booking; rows with an explicit non-booking
+horizon keep it), rows logged after scheduled departure are dropped, and ONE prediction (the latest) is kept per
+(flight, model version, bucket). Raw and de-duplicated counts are both reported.
+Matches whose scheduled time differs from BTS by more than 180 min, or that are ambiguous, are not scored.
+The "recent" drift window is the 14 days ending at the newest scored flight (BTS lags about two months).
 """
 
 import argparse
@@ -69,7 +76,7 @@ def metrics(df: pd.DataFrame) -> dict:
             "mean_predicted": float(p.mean()), "reliability": rel}
 
 
-def build_report(matched: pd.DataFrame, now: datetime, recent_days: int = RECENT_DAYS) -> dict:
+def build_report(matched: pd.DataFrame, now: datetime, recent_days: int = RECENT_DAYS, dedupe_stats: dict = None) -> dict:
     """matched: output of outcomes.match_predictions."""
     scored = matched[matched["matched"] & (matched["cancelled"] == False) & matched["label_d15"].notna()].copy()  # noqa: E712
     scored["week"] = (scored["sched_dep_local"].dt.normalize()
@@ -78,7 +85,10 @@ def build_report(matched: pd.DataFrame, now: datetime, recent_days: int = RECENT
     report = {
         "generated_utc": now.isoformat(),
         "counts": {
+            "predictions_raw": (dedupe_stats or {}).get("raw", int(len(matched))),
+            "dropped_after_departure": (dedupe_stats or {}).get("after_departure", 0),
             "predictions": int(len(matched)),
+            "by_match_status": {k: int(v) for k, v in matched["match_status"].value_counts().items()},
             "matched": int(matched["matched"].sum()),
             "unmatched": int(len(unmatched)),
             "scored": int(len(scored)),
@@ -98,7 +108,7 @@ def build_report(matched: pd.DataFrame, now: datetime, recent_days: int = RECENT
             {"prediction_id": str(r.prediction_id), "flight_id": r.flight_id, "origin": r.origin,
              "sched_dep_local": r.sched_dep_local.isoformat() if pd.notna(r.sched_dep_local) else None,
              "operating": f"{r.operating_airline or ''}{r.operating_number or ''}",
-             "marketing": f"{r.marketing_airline or ''}{r.marketing_number or ''}"}
+             "marketing": f"{r.marketing_airline or ''}{r.marketing_number or ''}", "status": r.match_status}
             for r in unmatched.sort_values("sched_dep_local").tail(20).itertuples()]
         report["unmatched_newest"] = newest.isoformat() if pd.notna(newest) else None
     for (mv, hz), g in scored.groupby(["model_version", "horizon"]):
@@ -107,8 +117,9 @@ def build_report(matched: pd.DataFrame, now: datetime, recent_days: int = RECENT
         m = metrics(g)
         m.pop("reliability")
         report["by_week"].append({"week": wk, "model_version": mv, "horizon": hz, **m})
-    cutoff = pd.Timestamp(now).tz_localize(None) - timedelta(days=recent_days)
-    recent = scored[scored["sched_dep_local"] >= cutoff]
+    anchor = scored["sched_dep_local"].max() if len(scored) else None
+    report["recent_anchor"] = anchor.isoformat() if anchor is not None and pd.notna(anchor) else None
+    recent = scored[scored["sched_dep_local"] > anchor - timedelta(days=recent_days)] if report["recent_anchor"] else scored.iloc[0:0]
     for (mv, hz), g in recent.groupby(["model_version", "horizon"]):
         m = metrics(g)
         m.pop("reliability")
@@ -125,7 +136,9 @@ def to_markdown(report: dict) -> str:
     L = [f"# FlyRely live accuracy report", "", f"Generated {report['generated_utc']}", "",
          "Scored against BTS final outcomes (label: departure delay >= 15 min; cancelled flights excluded from scoring).", "",
          "## Counts", "",
-         f"- Predictions logged: {c['predictions']}", f"- Matched to a BTS record: {c['matched']}",
+         f"- Predictions logged: {c['predictions_raw']} raw, {c['dropped_after_departure']} dropped (logged after departure), "
+         f"{c['predictions']} after keeping one per flight/model/lead-time bucket",
+         f"- Match status: {c['by_match_status']}", f"- Matched to a BTS record: {c['matched']}",
          f"- Scored (matched, not cancelled): {c['scored']}", f"- Cancelled: {c['cancelled']}, diverted: {c['diverted']}",
          f"- Unmatched: {c['unmatched']}", ""]
     o = report["overall"]
@@ -154,7 +167,7 @@ def to_markdown(report: dict) -> str:
                  "also flight-number or codeshare mismatches). By month of scheduled departure:")
         L += ["", "| month | n |", "|---|---|"] + [f"| {k} | {v} |" for k, v in report.get("unmatched_by_month", {}).items()]
         L += ["", "Most recent unmatched (up to 20):", ""]
-        L += [f"- {s['sched_dep_local']} {s['origin']} {s['operating'] or s['marketing']} ({s['flight_id']})"
+        L += [f"- {s['sched_dep_local']} {s['origin']} {s['operating'] or s['marketing']} ({s['flight_id']}): {s['status']}"
               for s in report["unmatched_sample"]]
     return "\n".join(L) + "\n"
 
@@ -168,10 +181,13 @@ def run(args, store=None, now=None) -> dict:
         rows = outcomes.load_bts_outcomes(preds, Path(args.bts_dir), now=now)
         n = ostore.upsert(rows)
         logging.info(f"Loaded {n} BTS outcome rows from {args.bts_dir} ({ostore.backend})")
+    raw_preds = preds
+    preds, dstats = outcomes.dedupe_predictions(raw_preds)
     matched = outcomes.match_predictions(preds, ostore.read()) if len(preds) else preds.assign(
+        match_status=pd.Series(dtype=object),
         matched=pd.Series(dtype=bool), label_d15=pd.Series(dtype=float), cancelled=pd.Series(dtype=object),
         diverted=pd.Series(dtype=object), dep_delay_min=pd.Series(dtype=float), outcome_source=pd.Series(dtype=object))
-    report = build_report(matched, now)
+    report = build_report(matched, now, dedupe_stats=dstats)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = now.strftime("%Y-%m-%d")
@@ -179,8 +195,8 @@ def run(args, store=None, now=None) -> dict:
     (out_dir / f"accuracy_{stamp}.md").write_text(to_markdown(report))
     logging.info(f"Wrote {out_dir}/accuracy_{stamp}.md and .json")
     if args.alert:
-        hours = float(os.environ.get("FLYRELY_ALERT_VOLUME_HOURS", "24"))
-        recent_n = int((preds["ts_utc"] >= pd.Timestamp(now) - timedelta(hours=hours)).sum()) if len(preds) else 0
+        hours = alerts._setting(os.environ, "FLYRELY_ALERT_VOLUME_HOURS", 24.0, float)
+        recent_n = int((raw_preds["ts_utc"] >= pd.Timestamp(now) - timedelta(hours=hours)).sum()) if len(raw_preds) else 0
         report["alerts"] = alerts.run_checks(report, recent_n)
     return report
 

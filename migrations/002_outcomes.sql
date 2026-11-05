@@ -2,7 +2,7 @@
 -- Run in the Supabase SQL editor (or any Postgres). The app/scorer also creates this table on first use.
 -- Server-side only: RLS is enabled with NO policies.
 --
--- One row per operating carrier + flight number + origin + local scheduled departure date + source.
+-- One row per operating carrier + flight number + origin + local scheduled departure date + scheduled time + source.
 -- label_d15 is the training label (departure delay >= 15 min); NULL when the flight was cancelled.
 
 create table if not exists outcomes (
@@ -14,14 +14,14 @@ create table if not exists outcomes (
     marketing_airline text,
     marketing_number  text,
     dest              text,
-    sched_dep_local   timestamp,
+    sched_dep_local   timestamp not null,  -- BTS CRS departure; part of the key so a reused flight number keeps both legs
     dep_delay_min     double precision,
     cancelled         boolean not null,
     diverted          boolean not null,
     label_d15         smallint,
     label_quality     text not null,   -- 'exact' (gate OUT) or 'estimated' (OFF minus taxi-out)
     fetched_utc       timestamptz not null,
-    primary key (carrier, flight_number, origin, sched_dep_date, source)
+    primary key (carrier, flight_number, origin, sched_dep_date, sched_dep_local, source)
 );
 
 create index if not exists idx_outcomes_marketing on outcomes (marketing_airline, marketing_number, origin, sched_dep_date);

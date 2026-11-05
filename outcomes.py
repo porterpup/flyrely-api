@@ -26,7 +26,7 @@ COLUMNS = [
     "marketing_number", "dest", "sched_dep_local", "dep_delay_min", "cancelled", "diverted",
     "label_d15", "label_quality", "fetched_utc",
 ]
-KEY = ["carrier", "flight_number", "origin", "sched_dep_date", "source"]
+KEY = ["carrier", "flight_number", "origin", "sched_dep_date", "sched_dep_local", "source"]
 SOURCE_PRIORITY = {"bts": 0, "aeroapi": 1, "swim": 2}  # final first, provisional after
 
 _SQLITE_DDL = """
@@ -39,14 +39,14 @@ CREATE TABLE IF NOT EXISTS outcomes (
     marketing_airline TEXT,
     marketing_number TEXT,
     dest TEXT,
-    sched_dep_local TEXT,
+    sched_dep_local TEXT NOT NULL,
     dep_delay_min REAL,
     cancelled INTEGER NOT NULL,
     diverted INTEGER NOT NULL,
     label_d15 INTEGER,
     label_quality TEXT NOT NULL,
     fetched_utc TEXT NOT NULL,
-    PRIMARY KEY (carrier, flight_number, origin, sched_dep_date, source)
+    PRIMARY KEY (carrier, flight_number, origin, sched_dep_date, sched_dep_local, source)
 );
 CREATE INDEX IF NOT EXISTS idx_outcomes_marketing
     ON outcomes (marketing_airline, marketing_number, origin, sched_dep_date);
@@ -62,14 +62,14 @@ _PG_DDL = [
         marketing_airline text,
         marketing_number text,
         dest text,
-        sched_dep_local timestamp,
+        sched_dep_local timestamp NOT NULL,
         dep_delay_min double precision,
         cancelled boolean NOT NULL,
         diverted boolean NOT NULL,
         label_d15 smallint,
         label_quality text NOT NULL,
         fetched_utc timestamptz NOT NULL,
-        PRIMARY KEY (carrier, flight_number, origin, sched_dep_date, source)
+        PRIMARY KEY (carrier, flight_number, origin, sched_dep_date, sched_dep_local, source)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_outcomes_marketing ON outcomes "
     "(marketing_airline, marketing_number, origin, sched_dep_date)",
@@ -84,6 +84,16 @@ _PG_DDL = [
         END IF;
     END $$""",
 ]
+
+# The scorer does bulk reads/writes, so it gets a longer statement timeout than the request path.
+SCORER_PG_KWARGS = {"connect_timeout": 5, "options": "-c statement_timeout=120000"}
+MAX_TIME_DIFF_MIN = 180  # a match whose scheduled times differ by more than this is rejected (e.g. UTC sent as local)
+
+
+def _pg_connect(store: PredictionStore):
+    import psycopg
+    return psycopg.connect(store.database_url, **SCORER_PG_KWARGS)
+
 
 PRED_COLUMNS = [
     "prediction_id", "ts_utc", "flight_id", "client", "origin", "dest", "sched_dep_local",
@@ -118,7 +128,7 @@ class OutcomeStore:
         if self._ready:
             return
         if self.store.database_url:
-            with self.store._connect_pg() as conn:
+            with _pg_connect(self.store) as conn:
                 for stmt in _PG_DDL:
                     conn.execute(stmt)
         else:
@@ -149,7 +159,7 @@ class OutcomeStore:
                 r["sched_dep_local"] = (pd.Timestamp(r["sched_dep_local"]).to_pydatetime()
                                         if r["sched_dep_local"] is not None else None)
                 r["fetched_utc"] = pd.Timestamp(r["fetched_utc"]).to_pydatetime()
-            with self.store._connect_pg() as conn:
+            with _pg_connect(self.store) as conn:
                 with conn.cursor() as cur:
                     cur.executemany(
                         f"INSERT INTO outcomes ({cols}) VALUES ({', '.join(['%s'] * len(COLUMNS))}) {conflict}",
@@ -176,7 +186,7 @@ class OutcomeStore:
 
 def _query_df(store: PredictionStore, sql: str, columns: list) -> pd.DataFrame:
     if store.database_url:
-        with store._connect_pg() as conn:
+        with _pg_connect(store) as conn:
             rows = conn.execute(sql).fetchall()
     else:
         with closing(store._connect_sqlite()) as conn:
@@ -184,14 +194,22 @@ def _query_df(store: PredictionStore, sql: str, columns: list) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def _is_missing_table(e: Exception) -> bool:
+    name = type(e).__name__
+    return name == "UndefinedTable" or (name == "OperationalError" and "no such table" in str(e))
+
+
 def read_predictions(store: PredictionStore, since: Optional[str] = None) -> pd.DataFrame:
-    """Logged predictions as a DataFrame, with prepared matching columns. Empty if the table doesn't exist yet."""
+    """Logged predictions as a DataFrame. Empty if the predictions table doesn't exist yet.
+    Read-only: does not run the prediction log's DDL."""
     try:
-        store._ensure_schema()
         df = _query_df(store, f"SELECT {', '.join(PRED_COLUMNS)} FROM predictions", PRED_COLUMNS)
-    except Exception as e:  # never created, or DB unreachable: let callers decide
-        logger.warning(f"Could not read predictions: {type(e).__name__}: {e}")
-        raise
+    except Exception as e:
+        if _is_missing_table(e):
+            logger.info("predictions table does not exist yet")
+            df = pd.DataFrame(columns=PRED_COLUMNS)
+        else:
+            raise
     df["ts_utc"] = pd.to_datetime(df["ts_utc"], utc=True, format="ISO8601")
     local = pd.to_datetime(df["sched_dep_local"], format="ISO8601")
     df["sched_dep_local"] = local.dt.tz_localize(None) if local.dt.tz is not None else local
@@ -199,6 +217,46 @@ def read_predictions(store: PredictionStore, since: Optional[str] = None) -> pd.
     if since:
         df = df[df["sched_dep_local"] >= pd.Timestamp(since)].reset_index(drop=True)
     return df
+
+
+# Horizon buckets for /predict rows, which are all logged with horizon="booking" and are scored
+# by how long before scheduled departure they were made (minutes_to_departure, set at log time).
+# Rows that already carry a specific horizon keep it.
+HORIZON_BUCKETS = [(90, "t-1h"), (300, "t-3h"), (1800, "t-1d")]  # upper bounds in minutes; above the last: "booking"
+
+
+def horizon_bucket(horizon: str, minutes) -> str:
+    if horizon != "booking":
+        return horizon
+    if minutes is None or pd.isna(minutes):
+        return "unknown-lead"
+    for upper, name in HORIZON_BUCKETS:
+        if minutes <= upper:
+            return name
+    return "booking"
+
+
+def dedupe_predictions(preds: pd.DataFrame):
+    """One prediction per (flight, model version, horizon bucket): the latest one made before departure.
+
+    /predict logs on every call, so a flight polled 50 times would otherwise count 50 times.
+    Rows logged after scheduled departure (minutes_to_departure < 0) are dropped as leaked.
+    Flight = scheduled local departure + origin + operating (else marketing) carrier and number.
+    Returns (deduped frame with `horizon` replaced by its bucket, {"raw", "after_departure", "deduped"})."""
+    stats = {"raw": int(len(preds)), "after_departure": 0, "deduped": 0}
+    if preds.empty:
+        return preds, stats
+    p = preds[~(preds["minutes_to_departure"].fillna(0) < 0)].copy()
+    stats["after_departure"] = stats["raw"] - len(p)
+    p["horizon"] = [horizon_bucket(h, m) for h, m in zip(p["horizon"], p["minutes_to_departure"])]
+    carrier = p["operating_airline"].fillna(p["marketing_airline"])
+    number = p["operating_number"].where(p["operating_number"].notna(), p["marketing_number"]).map(norm_number)
+    p["_flight"] = (carrier.astype(str) + "|" + number.astype(str) + "|" + p["origin"].astype(str) + "|"
+                    + p["sched_dep_local"].astype(str))
+    p = (p.sort_values("ts_utc").drop_duplicates(["_flight", "model_version", "horizon"], keep="last")
+         .drop(columns="_flight").reset_index(drop=True))
+    stats["deduped"] = int(len(p))
+    return p, stats
 
 
 def _prep_pred_keys(preds: pd.DataFrame) -> pd.DataFrame:
@@ -212,39 +270,55 @@ def _prep_pred_keys(preds: pd.DataFrame) -> pd.DataFrame:
 
 
 def match_predictions(preds: pd.DataFrame, outcomes: pd.DataFrame) -> pd.DataFrame:
-    """Left-join outcomes onto predictions; adds `matched`, `label_d15`, `cancelled`, `diverted`,
-    `dep_delay_min`, `outcome_source`. Operating key first, then marketing key. Final sources win over provisional."""
-    p = _prep_pred_keys(preds)
+    """Left-join outcomes onto predictions. Adds `matched`, `match_status`, `label_d15`, `cancelled`,
+    `diverted`, `dep_delay_min`, `outcome_source`.
+
+    Operating key first, then marketing key. When a key has several BTS rows (a flight number reused on one
+    day) the row whose scheduled time is closest to the prediction's wins; a tie is `ambiguous`, and a best
+    row more than MAX_TIME_DIFF_MIN away is `time_mismatch` (also catches UTC sent as local time). Neither
+    is scored. Final sources win over provisional ones. Statuses: matched, no_record, ambiguous, time_mismatch."""
+    p = _prep_pred_keys(preds).reset_index(drop=True)
     out_cols = ["label_d15", "cancelled", "diverted", "dep_delay_min", "source"]
     o = outcomes.copy()
     o["_date"] = pd.to_datetime(o["sched_dep_date"]).dt.normalize()
+    o["_sched"] = pd.to_datetime(o["sched_dep_local"], format="ISO8601")
     o["_prio"] = o["source"].map(SOURCE_PRIORITY).fillna(99)
     o = o.sort_values("_prio")
     o["flight_number"] = o["flight_number"].map(norm_number)
     o["marketing_number"] = o["marketing_number"].map(norm_number)
 
-    p["matched"] = False
+    p["match_status"] = "no_record"
     for c in out_cols:
         p[c] = pd.NA
-    p = p.reset_index(drop=True)
     p["_row"] = p.index
 
     passes = [("_op_c", "_op_n", "carrier", "flight_number"),
               ("_mk_c", "_mk_n", "marketing_airline", "marketing_number")]
     for pc, pn, oc, on in passes:
-        todo = p[~p["matched"] & p[pc].notna() & p[pn].notna()]
+        todo = p[(p["match_status"] == "no_record") & p[pc].notna() & p[pn].notna()]
         if todo.empty:
             continue
-        cand = o[o[oc].notna() & o[on].notna()].drop_duplicates([oc, on, "origin", "_date"])
-        m = todo[["_row", pc, pn, "origin", "_date"]].merge(
-            cand[[oc, on, "origin", "_date"] + out_cols],
+        cand = o[o[oc].notna() & o[on].notna()].drop_duplicates([oc, on, "origin", "_date", "_sched"])
+        m = todo[["_row", pc, pn, "origin", "_date", "sched_dep_local"]].merge(
+            cand[[oc, on, "origin", "_date", "_sched"] + out_cols],
             left_on=[pc, pn, "origin", "_date"], right_on=[oc, on, "origin", "_date"], how="inner")
         if m.empty:
             continue
-        idx = m["_row"].to_numpy()
+        m["_diff"] = (m["sched_dep_local"] - m["_sched"]).abs().dt.total_seconds() / 60
+        m = m.sort_values(["_row", "_diff"])
+        m["_rk"] = m.groupby("_row").cumcount()
+        best = m[m["_rk"] == 0].copy()
+        second = m[m["_rk"] == 1].set_index("_row")["_diff"]
+        best["_second"] = best["_row"].map(second)
+        ambiguous = best["_second"].notna() & (best["_second"] == best["_diff"])
+        mismatch = ~ambiguous & (best["_diff"] > MAX_TIME_DIFF_MIN)
+        ok = best[~ambiguous & ~mismatch]
+        p.loc[best.loc[ambiguous, "_row"], "match_status"] = "ambiguous"
+        p.loc[best.loc[mismatch, "_row"], "match_status"] = "time_mismatch"
         for c in out_cols:
-            p.loc[idx, c] = m[c].to_numpy()
-        p.loc[idx, "matched"] = True
+            p.loc[ok["_row"].to_numpy(), c] = ok[c].to_numpy()
+        p.loc[ok["_row"].to_numpy(), "match_status"] = "matched"
+    p["matched"] = p["match_status"] == "matched"
     p = p.rename(columns={"source": "outcome_source"})
     return p.drop(columns=[c for c in p.columns if c.startswith("_")])
 
@@ -282,14 +356,17 @@ def load_bts_outcomes(preds: pd.DataFrame, bts_dir: Path, now: Optional[datetime
         "origin": b["Origin"].astype(str),
         "sched_dep_date": b["sched_dep_date"],
         "source": "bts",
-        "marketing_airline": b["Marketing_Airline_Network"].astype(str) if "Marketing_Airline_Network" in b else None,
+        "marketing_airline": (b["Marketing_Airline_Network"].astype(object)
+                              .where(b["Marketing_Airline_Network"].notna(), None)
+                              if "Marketing_Airline_Network" in b else None),
         "marketing_number": mk_num.map(norm_number) if mk_num is not None else None,
         "dest": b["Dest"].astype(str),
         "sched_dep_local": b["sched_dep_local"],
         "dep_delay_min": delay,
         "cancelled": cancelled,
         "diverted": diverted,
-        "label_d15": (delay >= 15).astype(int).where(~cancelled & delay.notna()),
+        # as in training (backtest.py): NaN delay on a flown flight counts as on time
+        "label_d15": (delay >= 15).astype(int).where(~cancelled),
         "label_quality": "exact",
         "fetched_utc": now,
     })

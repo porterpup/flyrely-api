@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import smtplib
+import ssl
 import urllib.request
 from email.message import EmailMessage
 
@@ -62,10 +63,14 @@ def send_alert(subject: str, body: str, env=None) -> list:
                 msg["To"] = env["FLYRELY_ALERT_SMTP_TO"]
                 msg.set_content(body)
                 port = int(env.get("FLYRELY_ALERT_SMTP_PORT", "587"))
-                cls = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
-                with cls(env["FLYRELY_ALERT_SMTP_HOST"], port, timeout=10) as s:
+                ctx = ssl.create_default_context()  # verifies the server certificate and hostname
+                if port == 465:
+                    smtp = smtplib.SMTP_SSL(env["FLYRELY_ALERT_SMTP_HOST"], port, timeout=10, context=ctx)
+                else:
+                    smtp = smtplib.SMTP(env["FLYRELY_ALERT_SMTP_HOST"], port, timeout=10)
+                with smtp as s:
                     if port != 465:
-                        s.starttls()
+                        s.starttls(context=ctx)
                     if env.get("FLYRELY_ALERT_SMTP_USER"):
                         s.login(env["FLYRELY_ALERT_SMTP_USER"], env.get("FLYRELY_ALERT_SMTP_PASSWORD", ""))
                     s.send_message(msg)
@@ -73,6 +78,18 @@ def send_alert(subject: str, body: str, env=None) -> list:
         except Exception as e:  # message only: exception text for URL errors can echo the webhook
             logger.warning(f"Alert via {ch} failed: {type(e).__name__}")
     return ok
+
+
+def _setting(env, name: str, default, cast):
+    """Parse a threshold from env; a malformed value logs a warning and falls back to the default."""
+    raw = env.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logger.warning(f"Ignoring malformed {name}; using default {default}")
+        return default
 
 
 def evaluate(report: dict, recent_prediction_count: int, env=None) -> list:
@@ -83,21 +100,21 @@ def evaluate(report: dict, recent_prediction_count: int, env=None) -> list:
     FLYRELY_ALERT_VOLUME_HOURS=24. The drift check uses the report's `recent` groups (rolling window)."""
     env = os.environ if env is None else env
     msgs = []
-    hours = float(env.get("FLYRELY_ALERT_VOLUME_HOURS", "24"))
+    hours = _setting(env, "FLYRELY_ALERT_VOLUME_HOURS", 24.0, float)
     if recent_prediction_count == 0:
         msgs.append(f"No predictions logged in the last {hours:g} hours.")
-    ece_max = float(env.get("FLYRELY_ALERT_ECE_MAX", "0.05"))
-    min_n = int(env.get("FLYRELY_ALERT_MIN_N", "500"))
-    base = env.get("FLYRELY_ALERT_BASELINE_BRIER")
-    margin = float(env.get("FLYRELY_ALERT_BRIER_MARGIN", "0.02"))
+    ece_max = _setting(env, "FLYRELY_ALERT_ECE_MAX", 0.05, float)
+    min_n = _setting(env, "FLYRELY_ALERT_MIN_N", 500, int)
+    base = _setting(env, "FLYRELY_ALERT_BASELINE_BRIER", None, float)
+    margin = _setting(env, "FLYRELY_ALERT_BRIER_MARGIN", 0.02, float)
     for g in report.get("recent", []):
         if g["n"] < min_n:
             continue
-        label = f"{g['model_version']} / {g['horizon']} (n={g['n']}, last {report['recent_days']}d)"
+        label = f"{g['model_version']} / {g['horizon']} (n={g['n']}, {report['recent_days']}d to {report.get('recent_anchor')})"
         if g["ece"] is not None and g["ece"] > ece_max:
             msgs.append(f"Calibration drift: {label} ECE {g['ece']:.3f} > {ece_max:.3f}.")
-        if base and g["brier"] is not None and g["brier"] > float(base) + margin:
-            msgs.append(f"Accuracy drift: {label} Brier {g['brier']:.4f} > baseline {float(base):.4f} + {margin:g}.")
+        if base is not None and g["brier"] is not None and g["brier"] > base + margin:
+            msgs.append(f"Accuracy drift: {label} Brier {g['brier']:.4f} > baseline {base:.4f} + {margin:g}.")
     return msgs
 
 
