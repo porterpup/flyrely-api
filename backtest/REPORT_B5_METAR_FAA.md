@@ -11,11 +11,12 @@ Data: 5,227,724 flights in the evaluation period, of which 5,108,811 were flown.
 
 ## Decision rule (restated from the protocol)
 
-An arm is adopted at a horizon only if both of these hold:
+An arm is adopted at a horizon only if both of these hold (`PROTOCOL_B5.md:112`, `experiments_b5.py:50-54`):
 - its Brier difference from the base is negative, with the 95% day-block bootstrap CI entirely below zero;
-- it improves Brier in most evaluation months.
+- its ECE is no worse than the base's ECE + 0.005.
 
-The combined A+B arm is reported for information only and does not gate adoption.
+"Months improved" is reported for information and does not decide adoption. The combined A+B arm is also reported
+for information only.
 
 ## Verdict
 
@@ -85,12 +86,14 @@ At T-1d the `gdp_prop` and `gdp_cover` flags are always zero because of the defa
 
 1. **Validation, not holdout.** Results are on validation months 2026-01..08 and should be confirmed on 2026-09 onward.
 2. **FAA program periods are defaults, not real periods.** Amendment 2 set them as GS 90 min and GDP 480 min, based
-   on a sample of 230 detail pages. 24,331 of 27,045 advisories used the default. Live serving would know the real
-   periods, so behaviour in production could differ.
+   on a sample of 230 detail pages. **Every** advisory uses the default period, because `programs.parquet` holds no
+   real periods. (24,331 of the 27,045 advisories are at airports in the flight data.) Production must use the same
+   default lengths, not the live feed's real periods, or the live inputs will differ from what the model was trained on.
 3. **FAA probably partly acts as a "system already disrupted" signal.** It uses only information stamped at or before
    each cutoff. In production it needs a reliable live FAA feed; if the feed is missing, predictions fall back to base.
-4. **METAR gaps.** 7 of the 100 airports have no METAR station, and flights there get missing values. Coverage at both
-   ends is 76 to 80%.
+4. **METAR gaps.** 7 airports (ANC, HNL, KOA, LIH, OGG, PBI, SJU) have empty METAR files, so flights there get missing
+   values. These airports DO have stations. The cause is that `fetch_metar.py:63` sends the 3-letter code, while the
+   archive needs codes like PANC, PHNL and TJSJ. Coverage at both ends is 76 to 80%.
 5. **METAR horizons.** METAR was tested only at T-3h and T-1h, as the protocol specified.
 6. **METAR's gain is tiny.** Whether it justifies a live aviationweather.gov dependency is a product decision. FAA is
    the more valuable source.
@@ -98,6 +101,28 @@ At T-1d the `gdp_prop` and `gdp_cover` flags are always zero because of the defa
    for multiple comparisons does not change the verdict.
 8. **Rebuilt cache.** A truncated feature cache left over from 2026-11-03 crashed the first run. It was moved aside to
    `data/cache/b5_stale_20261103_truncated` (not deleted), and all features were rebuilt from scratch.
+
+## Known issues (found in final review; fix in a follow-up with a new protocol and a re-run before production)
+
+These are recorded rather than patched, because changing a feature definition after seeing results would break
+pre-registration. None of them is leakage.
+
+1. **Cancellations counted as new ground stops.** `fetch_faa_adv.py:64`: `classify()` only recognises "CNX", so 776
+   advisories titled "... GROUND STOP CANCELLATION" are treated as new programs. Each one switches on a fake 90-minute
+   ground stop after the real one has ended. This is noise and does not match the live feed.
+2. **No publication delay for METAR.** `flyrely_features/metar.py:107-111` counts a report as soon as its observation
+   time reaches the cutoff, with no allowance for the time it takes to be published. A lag of about 10 minutes would be safer.
+3. **One-hour clock error at non-DST airports.** `runup.airport_offsets` is off by an hour in the month of the clock
+   change at airports without daylight saving time (PHX, HNL, SJU; about 6k flights). This affects the base model too.
+4. **Holdout guards to extend.**
+   - `fetch_metar.py:49` (`busiest_airports`) would count holdout-month flights once 2026-09+ files exist.
+   - `experiments_b5.py` has no check on METAR timestamps.
+5. **Live station mapping.** `flyrely_features/metar.py:64` turns TJSJ into JSJ (`icaoId[-3:]`).
+6. **Protocol wording.** `PROTOCOL_B5.md:116`: "If neither condition is met" should read "If either condition fails".
+
+**What the FAA gain growing through the year means:** it is seasonal, not leakage. The gain per flagged flight
+stays flat at about -0.03 Brier every month. What grows is the share of flagged flights (2.6% in January to 10.1%
+in August), which follows the summer increase in FAA programs.
 
 ## Reproduce
 
