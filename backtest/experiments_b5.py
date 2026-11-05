@@ -1,9 +1,10 @@
 """
-B5: do observed METAR (A) and FAA GS/GDP programs (B) improve run-up delay prediction?  Implements
-backtest/PROTOCOL_B5.md (pre-registered and committed before this script was run).
+B5.1: do observed METAR (A) and FAA GS/GDP programs (B) improve run-up delay prediction?  Implements
+backtest/PROTOCOL_B5.md with the fixes of backtest/PROTOCOL_B5_1.md (both committed before this script was run;
+B5's own run is the earlier revision of this file, PR #12).
 
-    python backtest/experiments_b5.py            # writes backtest/results/b5_metar_faa.json
-    python backtest/experiments_b5.py --quick    # tiny debug run (2025 months only), writes b5_metar_faa_quick.json
+    python backtest/experiments_b5.py            # writes backtest/results/b5_1_metar_faa.json
+    python backtest/experiments_b5.py --quick    # tiny debug run (2025 months only), writes b5_1_metar_faa_quick.json
 
 Evaluation months 2026-01..08 are validation (PROTOCOL_ADDENDUM_2026-11.md); months >= 2026-09 are never loaded
 (runup.load stops at 2026-08 and this script hard-fails on anything later).
@@ -28,13 +29,13 @@ sys.path.insert(0, str(HERE.parent))
 
 import backtest as bt  # noqa: E402
 import runup  # noqa: E402
-from fetch_faa_adv import OUT as FAA_DIR  # noqa: E402
+from fetch_faa_adv import OUT as FAA_DIR, PROGRAMS_FILE  # noqa: E402
 from fetch_metar import busiest_airports  # noqa: E402
 from flyrely_features import faa, metar  # noqa: E402
 from flyrely_features._common import HORIZONS  # noqa: E402
 
 QUICK = runup.QUICK
-CACHE = HERE.parent / "data" / "cache" / ("b5_quick" if QUICK else "b5")
+CACHE = HERE.parent / "data" / "cache" / ("b5_1_quick" if QUICK else "b5_1")
 RESULTS = HERE / "results"
 ECE_TOLERANCE = 0.005
 FORBIDDEN_FROM = pd.Timestamp("2026-09-01")
@@ -66,13 +67,19 @@ def monthly_brier_diff(frame: pd.DataFrame, p_a: np.ndarray, p_b: np.ndarray) ->
 
 
 def load_programs() -> pd.DataFrame:
-    f = FAA_DIR / "programs.parquet"
+    f = FAA_DIR / PROGRAMS_FILE
     if not f.exists():
-        raise SystemExit(f"{f} missing: run backtest/fetch_faa_adv.py lists, details, build")
+        raise SystemExit(f"{f} missing: run backtest/fetch_faa_adv.py lists, build")
     p = pd.read_parquet(f)
     if p["sent_utc"].max() >= FORBIDDEN_FROM:
         raise RuntimeError("FAA programs contain advisories >= 2026-09 (protected holdout)")
     return p
+
+
+def check_metar_holdout(M) -> None:
+    """Hard-fail when any METAR observation is from the protected holdout (2026-09 on)."""
+    if M.ok and M.max_valid is not None and M.max_valid >= FORBIDDEN_FROM:
+        raise RuntimeError(f"METAR contains observations >= 2026-09 (protected holdout): {M.max_valid}")
 
 
 def main():
@@ -84,6 +91,7 @@ def main():
     W = runup.Weather(A["airports"])
     C, R = runup.build_counters(A), runup.Rotation(A)
     M = metar.Metar(A["airports"])
+    check_metar_holdout(M)
     prog = load_programs()
     covered = busiest_airports(100)
     P = faa.Programs(prog, A["airports"], covered)
@@ -99,7 +107,7 @@ def main():
     y = {k: frame[k]["delayed"].to_numpy()[flown[k]] for k in rows}
     ev = frame["eval"]
 
-    results = {"protocol": "backtest/PROTOCOL_B5.md", "quick_debug_run": QUICK, "periods": PERIODS,
+    results = {"protocol": "backtest/PROTOCOL_B5_1.md (on PROTOCOL_B5.md)", "quick_debug_run": QUICK, "periods": PERIODS,
                "coverage": {"metar_airports": int(M.n_airports), "faa_airports": int(P.n_airports),
                             "faa_advisories": int(len(prog)),
                             "faa_advisories_by_kind_status": {f"{k}/{s}": int(n) for (k, s), n in prog.groupby(["kind", "status"]).size().items()},
@@ -175,7 +183,7 @@ def main():
 
     results["verdict"] = {s: {h: results[h]["verdict"][s] for h in TESTS if s in results[h]["verdict"]} for s in ("A", "B")}
     results["recommend"] = {s: any(v.values()) for s, v in results["verdict"].items()}
-    out = RESULTS / ("b5_metar_faa_quick.json" if QUICK else "b5_metar_faa.json")
+    out = RESULTS / ("b5_1_metar_faa_quick.json" if QUICK else "b5_1_metar_faa.json")
     out.write_text(json.dumps(results, indent=2, default=float))
     log("wrote", out, results["verdict"])
 

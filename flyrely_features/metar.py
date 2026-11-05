@@ -13,9 +13,11 @@ import numpy as np
 import pandas as pd
 
 from ._common import DAY0, SHIFT, T
+from .stations import icao_to_code
 
 METAR_DIR = Path(__file__).resolve().parent.parent / "data" / "metar"
 MAX_AGE = 180            # minutes; an older report is treated as missing
+PUBLISH_LAG = 10         # minutes; a report is usable from observation time + PUBLISH_LAG
 NO_CEILING = 12000.0     # feet; value for "no broken/overcast layer"
 FEATURES = ["ceiling_ft", "vis_mi", "wind_kt", "gust_kt", "precip", "snow", "thunder", "freezing", "fog",
             "ifr", "p01i", "age_min"]
@@ -61,7 +63,7 @@ def from_aviationweather(records: list) -> pd.DataFrame:
     Fields used: icaoId, obsTime (epoch seconds), visib ("10+" or number), wspd, wgst, wxString, clouds [{cover, base}]."""
     rows = []
     for r in records:
-        row = {"station": str(r.get("icaoId", ""))[-3:], "valid": pd.to_datetime(r["obsTime"], unit="s"),
+        row = {"station": icao_to_code(str(r.get("icaoId", ""))), "valid": pd.to_datetime(r["obsTime"], unit="s"),
                "vsby": str(r.get("visib", "")).replace("+", "") or np.nan, "sknt": r.get("wspd"),
                "gust": r.get("wgst"), "wxcodes": r.get("wxString"), "p01i": r.get("precip")}
         for k, layer in enumerate((r.get("clouds") or [])[:4], 1):
@@ -74,6 +76,7 @@ def load_raw(airports: pd.Index, metar_dir: Path = None) -> pd.DataFrame:
     frames = []
     for f in sorted((metar_dir or METAR_DIR).glob("*.csv")):
         d = pd.read_csv(f, dtype=str)
+        d["station"] = f.stem.rsplit("_", 1)[0]     # airport code from the file name (IEM ids differ: PANC, DJT)
         frames.append(d)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -84,9 +87,12 @@ class Metar:
     def __init__(self, airports: pd.Index, metar_dir: Path = None, raw: pd.DataFrame = None):
         raw = raw if raw is not None else load_raw(airports, metar_dir)
         self.ok = len(raw) > 0
+        self.max_valid = None
         if not self.ok:
             return
         d = derive(raw)
+        tmax = d["t"].max()                 # over every raw row, also at airports that are not modelled
+        self.max_valid = DAY0 + pd.Timedelta(minutes=float(tmax)) if pd.notna(tmax) else None
         ap = airports.get_indexer(raw["station"])
         keep = (ap >= 0) & d["t"].notna().to_numpy()
         d, ap = d[keep], ap[keep]
@@ -100,15 +106,17 @@ class Metar:
         self.n_airports = int(self.covered.sum())
 
     def at(self, ap: np.ndarray, c: np.ndarray) -> dict:
-        """Latest report at or before c for airport ids `ap`; NaN where uncovered, none yet or older than MAX_AGE."""
+        """Latest report published by c (observed at or before c - PUBLISH_LAG) for airport ids `ap`; NaN where
+        uncovered, none yet or older than MAX_AGE (age is measured from the observation time to c)."""
         c = np.asarray(c, dtype="float64")
+        usable_to = c - PUBLISH_LAG
         bad = (ap < 0) | np.isnan(c)
         covered = np.where(ap >= 0, self.covered[np.clip(ap, 0, None)], False) & ~bad
-        q = np.where(covered, ap * T + np.floor(np.nan_to_num(c)).astype(np.int64), 0)
+        q = np.where(covered, ap * T + np.floor(np.nan_to_num(usable_to)).astype(np.int64), 0)
         j = np.searchsorted(self.key, q, side="right") - 1
         jj = np.clip(j, 0, len(self.key) - 1)
         age = c - self.t[jj]
-        ok = covered & (j >= 0) & (self.key[jj] // T == ap) & (age <= MAX_AGE)
+        ok = covered & (j >= 0) & (self.key[jj] // T == ap) & (age <= MAX_AGE) & (self.t[jj] <= usable_to)
         out = {k: np.where(ok, v[jj], np.nan) for k, v in self.cols.items()}
         out["age_min"] = np.where(ok, age, np.nan)
         return out

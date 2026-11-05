@@ -54,34 +54,40 @@ def hhmm_to_min(s: pd.Series) -> np.ndarray:
     return (v // 100) * 60 + v % 100
 
 
-def airport_offsets(o, d, ym, dep, arr, elapsed, n_airports, anchor) -> np.ndarray:
-    """Minutes each airport's local clock is ahead of `anchor` (ATL), per month.
+AIRPORT_TZ_CSV = ROOT / "models" / "airports_ref.csv"
 
-    For every route, arr - dep - elapsed = offset(dest) - offset(origin). Take the
-    most common value per route and month, then walk the route graph from ATL.
-    """
-    diff = (arr - dep - elapsed) % 1440
-    diff = np.round(np.where(diff > 720, diff - 1440, diff) / 60) * 60
-    e = pd.DataFrame({"ym": ym, "o": o, "d": d, "diff": diff}).dropna()
-    e = (e.groupby(["ym", "o", "d", "diff"]).size().rename("n").reset_index()
-         .sort_values("n", ascending=False).drop_duplicates(["ym", "o", "d"]))
-    n_months = int(ym.max()) + 1
-    off = np.full((n_months, n_airports), np.nan)
-    for m, g in e.groupby("ym"):
-        known = {anchor: 0.0}
-        edges = list(zip(g["o"], g["d"], g["diff"]))
-        changed = True
-        while changed:
-            changed = False
-            for a, b, w in edges:
-                if a in known and b not in known:
-                    known[b] = known[a] + w
-                    changed = True
-                elif b in known and a not in known:
-                    known[a] = known[b] - w
-                    changed = True
-        for a, v in known.items():
-            off[int(m), a] = v
+
+def airport_zones(airports: pd.Index, csv=None) -> list:
+    """IANA time zone per airport from models/airports_ref.csv (None where the airport is not listed)."""
+    tz = pd.read_csv(csv or AIRPORT_TZ_CSV, dtype=str).set_index("iata")["tz"]
+    return [tz.get(a) for a in airports]
+
+
+def utc_offset_minutes(zone: str, n_days: int) -> np.ndarray:
+    """UTC offset (minutes ahead of UTC) of `zone` at local noon of each day since DAY0."""
+    from zoneinfo import ZoneInfo
+    z = ZoneInfo(zone)
+    return np.array([(DAY0 + pd.Timedelta(days=i, hours=12)).to_pydatetime().replace(tzinfo=z).utcoffset().total_seconds() / 60
+                     for i in range(n_days)])
+
+
+def airport_offsets(airports: pd.Index, n_days: int, anchor: str = "ATL", zones: list = None) -> np.ndarray:
+    """Minutes each airport's local clock is ahead of `anchor` (ATL), per day: shape (n_days, n_airports).
+
+    From the tz database, so airports without daylight saving time (PHX, HNL, SJU, ...) are right on the clock-change
+    days (B5.1 fix (d); the earlier route-graph derivation was one month wide). Offsets are taken at local noon, so
+    flights in the few hours before the change on the two change days use the post-change offset.
+    NaN where the airport has no known zone."""
+    zones = zones if zones is not None else airport_zones(airports)
+    ref = utc_offset_minutes(zones[airports.get_loc(anchor)], n_days)
+    cache = {}
+    off = np.full((n_days, len(airports)), np.nan)
+    for j, z in enumerate(zones):
+        if z is None:
+            continue
+        if z not in cache:
+            cache[z] = utc_offset_minutes(z, n_days)
+        off[:, j] = cache[z] - ref
     return off
 
 
@@ -115,12 +121,10 @@ def load() -> tuple[pd.DataFrame, dict]:
     A["ym_id"] = yms.get_indexer(df["ym"])
     A["day"] = (df["FlightDate"] - DAY0).dt.days.to_numpy().astype(np.int64)
     A["dep_local"] = hhmm_to_min(df["CRSDepTime"])
-    arr_local = hhmm_to_min(df["CRSArrTime"])
     elapsed = df["CRSElapsedTime"].astype("float64").to_numpy()
 
-    off = airport_offsets(A["o_id"], A["d_id"], A["ym_id"], A["dep_local"], arr_local, elapsed,
-                          len(airports), airports.get_loc("ATL"))
-    off_o = off[A["ym_id"], A["o_id"]]
+    off = airport_offsets(airports, int(A["day"].max()) + 1)
+    off_o = off[A["day"], A["o_id"]]
     A["s_dep"] = A["day"] * 1440 + A["dep_local"] - off_o + SHIFT  # Eastern-reference minutes
     A["s_arr"] = A["s_dep"] + elapsed
     A["elapsed"] = np.nan_to_num(elapsed)

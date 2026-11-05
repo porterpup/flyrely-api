@@ -4,14 +4,15 @@ Advisories Database (https://www.fly.faa.gov/adv/advADB, no key).
 
     python backtest/fetch_faa_adv.py lists   [--start 2024-01-01] [--end 2026-08-31] [--pause 1.5]
     python backtest/fetch_faa_adv.py details [--airports-top 100] [--pause 1.5]
-    python backtest/fetch_faa_adv.py build                      # -> data/faa_adv/programs.parquet
+    python backtest/fetch_faa_adv.py build                      # -> data/faa_adv/programs_v2.parquet
 
 Phase 1 (`lists`): one request per day, listing every GS/GDP advisory of that day (number, control element,
 title, send time in UTC). Cached as data/faa_adv/list/<date>.html.
 Phase 2 (`details`, optional; B5 uses `--sample` only to validate the default durations, because the server needs
 ~7 s per page and the full set is ~17,000 pages): one request per non-cancel advisory, to read the program period
 ("GROUND STOP PERIOD", "CUMULATIVE PROGRAM PERIOD"). Cached as data/faa_adv/detail/<date>_<n>.txt.
-Phase 3 (`build`): parse into data/faa_adv/programs.parquet (one row per advisory).
+Phase 3 (`build`): parse into data/faa_adv/programs_v2.parquet (one row per advisory). v2 (B5.1) treats every
+cancellation wording (CNX, CANCELLED, CANCELLATION, ...) as a cancel; programs.parquet (B5) is kept untouched.
 
 Polite: strictly sequential, a pause between requests, back-off on errors, everything cached, resumable.
 Holdout lock: dates after 2026-08-31 are refused unless FLYRELY_HOLDOUT_UNLOCK=1.
@@ -35,6 +36,7 @@ OUT = ROOT / "data" / "faa_adv"
 BASE = "http://www.fly.faa.gov/adv"
 UA = "flyrely-research/1.0 (sequential, cached; seanthomasbutton@gmail.com)"
 HOLDOUT_LAST_ALLOWED = "2026-08-31"
+PROGRAMS_FILE = "programs_v2.parquet"   # B5.1; B5 used programs.parquet (kept)
 LIST_PARAMS = {"whichAdvisories": "ATCSCC", "advisoryCategory": "NotAll", "gStop": "true", "_gStop": "on",
                "gDelay": "true", "_gDelay": "on", "_airflow": "on", "_ctop": "on", "_route": "on", "_other": "on"}
 
@@ -57,11 +59,15 @@ def _text(s: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]*>", " ", s))).strip()
 
 
+# CNX, CANCEL, CANCELLED, CANCELED, CANCELLATION, CANCELATION, CANX, CNCL (word starts only)
+_CANCEL = re.compile(r"\b(CNX|CANX|CNCL|CANCEL\w*)\b")
+
+
 def classify(title: str):
     """(kind, status) from a brief title; None for anything that is not a GS or a GDP program advisory.
     kind: GS | GDP. status: active | proposed | cancel."""
     t = title.upper()
-    if "CNX" in t.split() or t.endswith(" CNX"):
+    if _CANCEL.search(t):
         status = "cancel"
     elif "PROPOSED" in t:
         status = "proposed"
@@ -212,9 +218,9 @@ def cmd_build(a):
     out["sent_utc"] = pd.to_datetime(out["sent_utc"], utc=True).dt.tz_localize(None)
     for c in ("period_start", "period_end"):
         out[c] = pd.to_datetime(out[c], utc=True).dt.tz_localize(None)
-    out.to_parquet(OUT / "programs.parquet")
+    out.to_parquet(OUT / PROGRAMS_FILE)
     print(out.groupby(["kind", "status"]).size())
-    print("wrote", OUT / "programs.parquet", len(out))
+    print("wrote", OUT / PROGRAMS_FILE, len(out))
 
 
 def main():
