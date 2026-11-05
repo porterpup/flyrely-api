@@ -60,3 +60,17 @@ def test_cost_table_and_caps():
     t = oh.cost_table()
     assert t["every_2min"]["credits_per_hub_24h"] == 720 and t["every_2min"]["hubs_fitting_in_4000_24h"] == 5
     assert oh.STATES_CAP - oh.STATES_BEFORE_PHASE == 1500
+
+
+def test_classify_hub_applies_preregistered_rule():
+    ok = {"n": 50, "median": 130.0}
+    assert oh.classify_hub(0.95, 0.9, ok, ok) == "reliable"
+    assert oh.classify_hub(0.95, 0.9, None, ok) == "partial"   # no bracketed departures: timing not verifiable
+    assert oh.classify_hub(0.95, 0.9, {"n": 50, "median": 200.0}, ok) == "partial"   # bracket median above 3 minutes
+    assert oh.classify_hub(0.8, 0.9, ok, ok) == "partial"
+    assert oh.classify_hub(0.95, 0.65, ok, ok) == "not usable"
+
+
+def test_airline_callsign_pattern_is_icao_plus_one_to_four_digits():
+    assert oh.AL_RE.match("DAL1234") and oh.AL_RE.match("SWA7")
+    assert not oh.AL_RE.match("DAL12345") and not oh.AL_RE.match("N123AB") and not oh.AL_RE.match("DAL12A")

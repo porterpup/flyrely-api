@@ -138,7 +138,7 @@ import opensky_coverage as oco  # noqa: E402
 
 R_DEP, R_ARR_AIR, R_ARR_GND = 15.0, 25.0, 5.0
 AGL_DEP, AGL_ARR, MAX_GAP = 1200.0, 600.0, 600.0
-AL_RE = re.compile(r"^[A-Z]{3}\d{1,4}[A-Z]?$")
+AL_RE = re.compile(r"^[A-Z]{3}\d{1,4}$")   # protocol: 3-letter ICAO carrier code + 1 to 4 digits
 
 
 def load_hub_snapshots():
@@ -249,7 +249,7 @@ def expected_and_recurring(ref):
     return full, fl
 
 
-def ratio_for(events, fl, blocks_iv, hubs, step_label):
+def ratio_for(events, fl, blocks_iv, hubs, step_label, restrict_to_schedule=False):
     """Aggregate detected/expected per hub, for the given (already thinned) events. blocks_iv = interior windows."""
     known = {}
     out = {}
@@ -258,8 +258,9 @@ def ratio_for(events, fl, blocks_iv, hubs, step_label):
             sub = fl[fl[col_h] == h]
             for g, name in ((None, "all"), ("mainline", "mainline"), ("regional", "regional")):
                 ss = sub if g is None else sub[sub.op.isin(oco.MAINLINE) == (g == "mainline")]
-                kn = set(ss.cs_op) | set(ss.cs_mk)
-                ee = events[(events.hub == h) & (events.kind == kind) & events.cs.isin(kn)]
+                ee = events[(events.hub == h) & (events.kind == kind)]
+                if restrict_to_schedule:   # stricter sensitivity: only callsigns that BTS lists for this hub/direction
+                    ee = ee[ee.cs.isin(set(ss.cs_op) | set(ss.cs_mk))]
                 if g is not None:
                     ee = ee[ee.cs.str[:3].map(oco.ICAO_TO_IATA).isin(oco.MAINLINE) == (g == "mainline")]
                 for bi, (w0, w1) in enumerate(blocks_iv):
@@ -297,8 +298,20 @@ def cost_table():
         t[f"every_{m}min"] = {"credits_per_hub_24h": int(1440 / m), "credits_per_hub_16h_daytime": int(960 / m),
                               "hubs_fitting_in_4000_24h": int(4000 // (1440 / m)), "hubs_fitting_in_4000_16h": int(4000 // (960 / m)),
                               "conus_one_call_24h": int(1440 / m * 4), "conus_one_call_16h": int(960 / m * 4),
-                              "boxes_cheaper_than_conus_up_to_n_hubs": 4}
+                              "boxes_cheaper_than_one_conus_call_when_hubs_below": 4}
     return t
+
+
+def classify_hub(dep_ratio, arr_ratio, dep_bracket, arr_bracket, min_bracket_n=10):
+    """Pre-registered rule, daytime block, 2-minute polling. dep_bracket/arr_bracket = {"n", "median"} (seconds) or None.
+    reliable: both ratios >= 0.85 and median bracket <= 180 s in both directions (a median from fewer than min_bracket_n
+    bracketed events, or none, cannot be verified and does not pass); not usable: either ratio < 0.7; otherwise partial."""
+    if dep_ratio is None or arr_ratio is None:
+        return "no data"
+    if min(dep_ratio, arr_ratio) < 0.7:
+        return "not usable"
+    br_ok = all(b is not None and b["n"] >= min_bracket_n and b["median"] <= 180 for b in (dep_bracket, arr_bracket))
+    return "reliable" if (min(dep_ratio, arr_ratio) >= 0.85 and br_ok) else "partial"
 
 
 def analyze():
@@ -312,8 +325,7 @@ def analyze():
     a = a[a["type"].isin(["large_airport", "medium_airport"]) & (a.scheduled_service == "yes") & a.iata_code.notna()]
     airports = [(float(r.latitude_deg), float(r.longitude_deg), float(r.elevation_ft) * .3048 if pd.notna(r.elevation_ft) else 0.0) for r in a.itertuples()]
     full, fl = expected_and_recurring(ref)
-    known_all = set(fl.cs_op) | set(fl.cs_mk)
-    d = d[d.cs.isin(known_all)].copy()       # BTS-schedule callsigns only (drops international / charter / unknown)
+    known_all = set(fl.cs_op) | set(fl.cs_mk)   # used by the optional /flights comparison
 
     blocks = blocks_from(d.t)
     interior = [(a_ + 1800, b_ - 1800) for a_, b_ in blocks if b_ - a_ > 3600]
@@ -340,42 +352,73 @@ def analyze():
     sm = summarize_ratio(ratio_for(ev, fl, interior, HUBS, "step1"))
     res["detection_ratio_2min"] = sm
     res["events_total"] = {k: int(v) for k, v in ev.kind.value_counts().items()}
-    # ---- timing (bracket widths)
+    # ---- timing (bracket widths), overall and per hub, for all windows and for the daytime block only
     br = ev[ev.bracketed]
+    day0, day1 = blocks[-1]
+
+    def bw(x):
+        return {"n": int(len(x)), "median": float(x.bracket_s.median()), "p90": float(x.bracket_s.quantile(.9))} if len(x) else None
+
     res["timing"] = {
         "share_bracketed": {k: float(ev[ev.kind == k].bracketed.mean()) for k in ("dep", "arr") if (ev.kind == k).any()},
-        "bracket_width_s": {k: {"median": float(br[br.kind == k].bracket_s.median()), "p90": float(br[br.kind == k].bracket_s.quantile(.9))}
-                            for k in ("dep", "arr") if (br.kind == k).any()}}
-    # ---- identity-level (recurring flights), tails, plausibility of takeoff timing
+        "bracket_width_s": {k: bw(br[br.kind == k]) for k in ("dep", "arr")},
+        "bracket_width_s_daytime_block": {k: bw(br[(br.kind == k) & br.t.between(day0, day1)]) for k in ("dep", "arr")},
+        "bracket_width_s_by_hub_daytime_block": {h: {k: bw(br[(br.hub == h) & (br.kind == k) & br.t.between(day0, day1)]) for k in ("dep", "arr")} for h in HUBS},
+        "bracket_width_s_by_hub_all": {h: {k: bw(br[(br.hub == h) & (br.kind == k)]) for k in ("dep", "arr")} for h in HUBS}}
+    # ---- primary metric per hub and per hour (interior windows cut into hourly bins)
+    hourly, hlabels = [], []
+    for wi, (w0, w1) in enumerate(interior):
+        t0 = w0
+        while t0 < w1:
+            hourly.append((t0, min(t0 + 3600, w1)))
+            hlabels.append(pd.Timestamp(t0, unit="s").isoformat() + "Z")
+            t0 += 3600
+    hr = summarize_ratio(ratio_for(ev, fl, hourly, HUBS, "hourly"))["by_hub"]
+    res["detection_ratio_by_hour"] = {"bins_utc": hlabels, "by_hub": hr}
+    # ---- sensitivity: numerator restricted to callsigns BTS lists for that hub and direction (a lower bound: identity-level)
+    res["detection_ratio_2min_schedule_callsign_only"] = summarize_ratio(ratio_for(ev, fl, interior, HUBS, "step1", restrict_to_schedule=True))
+    # ---- identity-level (recurring flights, secondary metric), tails, takeoff-timing plausibility
+    fl["sarr"] = fl.won - fl.ArrDelay.fillna(0) * 60      # approx. scheduled arrival (wheels-on minus arrival delay; ignores taxi-in)
     key = ["op", "cs_op", "cs_mk", "Origin", "Dest", "dep_min", "L"]
-    rec = fl.groupby(key).agg(n=("sdep", "size"), sdep=("sdep", "median"), won=("won", "median"), woff=("woff", "median"),
+    rec = fl.groupby(key).agg(n=("sdep", "size"), sdep=("sdep", "median"), sarr=("sarr", "median"), won=("won", "median"), woff=("woff", "median"),
                               n_src=("n_src", "first"),
                               tail=("Tail_Number", lambda s: s.mode().iloc[0] if s.notna().any() else None),
                               tail_share=("Tail_Number", lambda s: s.value_counts(normalize=True).iloc[0] if s.notna().any() else np.nan)).reset_index()
     rec = rec[rec.n >= 0.75 * rec.n_src]
-    rec["icao24_pred"] = rec.tail.map(oco.n_number_to_icao24)
-    ident, tails = {}, {}
+    rec["icao24_pred"] = rec["tail"].map(oco.n_number_to_icao24)
+    ident, lag_rows = {}, []
     for h in HUBS:
-        for kind, col, tcol in (("dep", "Origin", "woff"), ("arr", "Dest", "won")):
-            r = rec[(rec[col] == h) & rec[tcol].between(*interior[0])] if False else rec[(rec[col] == h) & (rec[tcol].between(interior[0][0], interior[0][1]) | (rec[tcol].between(interior[-1][0], interior[-1][1])))]
-            if r.empty:
-                continue
+        for kind, col, tcol, scol in (("dep", "Origin", "woff", "sdep"), ("arr", "Dest", "won", "sarr")):
             e = ev[(ev.hub == h) & (ev.kind == kind)]
-            e1 = e.melt if False else e
-            m = r[["cs_op", "cs_mk", tcol, "icao24_pred", "tail_share"]].reset_index(drop=True)
-            hit, same_tail = 0, 0
-            lags = []
-            for rr in m.itertuples():
-                cand = e[e.cs.isin([rr.cs_op, rr.cs_mk]) & ((e.t - getattr(rr, tcol)).abs() <= 3600)]
-                if len(cand):
-                    hit += 1
-                    best = cand.iloc[(cand.t - getattr(rr, tcol)).abs().argmin()]
-                    lags.append(best.t - getattr(rr, tcol))
-                    same_tail += int(rr.icao24_pred is not None and best.icao24 == rr.icao24_pred)
-            ident.setdefault(h, {})[kind] = {"recurring_flights": int(len(m)), "matched_by_callsign_within_60min": hit,
-                                            "rate": hit / len(m), "modal_tail_equals_observed_icao24": (same_tail / hit if hit else None),
-                                            "median_tail_stability_in_august": float(m.tail_share.median())}
+            for bi, (w0, w1) in enumerate(interior):
+                r = rec[(rec[col] == h) & rec[tcol].between(w0, w1)]    # flights whose expected event falls in the interior window
+                if r.empty:
+                    continue
+                hit, same_tail = 0, 0
+                for rr in r.itertuples():
+                    sch = getattr(rr, scol)
+                    cand = e[e.cs.isin([rr.cs_op, rr.cs_mk]) & ((e.t - sch).abs() <= 3600)]   # within 60 min of SCHEDULED time
+                    if len(cand):
+                        hit += 1
+                        best = cand.iloc[(cand.t - sch).abs().argmin()]
+                        same_tail += int(rr.icao24_pred is not None and best.icao24 == rr.icao24_pred)
+                        if kind == "dep":
+                            lag_rows.append((h, bi, float(best.t - sch), float(getattr(rr, tcol) - sch)))
+                ident.setdefault(h, {}).setdefault(kind, {})[f"block{bi}"] = {
+                    "recurring_flights": int(len(r)), "matched_by_callsign_within_60min_of_scheduled": hit, "rate": hit / len(r),
+                    "modal_tail_equals_observed_icao24": (same_tail / hit if hit else None),
+                    "median_tail_stability_in_august": float(r.tail_share.median())}
     res["identity_level_lower_bound"] = ident
+    lg = pd.DataFrame(lag_rows, columns=["hub", "block", "state_takeoff_minus_sched_s", "aug_wheelsoff_minus_sched_s"])
+
+    def q(x):
+        return {"n": int(len(x)), "p10": float(x.quantile(.1)), "p50": float(x.quantile(.5)), "p90": float(x.quantile(.9))} if len(x) else None
+
+    res["takeoff_vs_schedule_plausibility"] = {
+        "note": "matched recurring departures only; August column = wheels-off minus scheduled for the same matched flights (seconds)",
+        "by_block": {f"block{b}": {"detected": q(lg[lg.block == b].state_takeoff_minus_sched_s), "august_bts": q(lg[lg.block == b].aug_wheelsoff_minus_sched_s)} for b in sorted(lg.block.unique())},
+        "by_hub_median_s": {h: {"detected": float(lg[lg.hub == h].state_takeoff_minus_sched_s.median()), "august_bts": float(lg[lg.hub == h].aug_wheelsoff_minus_sched_s.median()), "n": int((lg.hub == h).sum())}
+                            for h in HUBS if (lg.hub == h).any()}}
     # ---- observed turnarounds: departure whose aircraft arrived at same hub earlier in the block
     ta = {}
     for h in HUBS:
@@ -437,6 +480,15 @@ def analyze():
                       "flights_spent_total": oc.credits_spent("/flights"), "states_remaining": oc.last_remaining("/states"),
                       "flights_remaining": oc.last_remaining("/flights")}
     res["cost_table"] = cost_table()
+    last = f"block{len(interior) - 1}"
+    cls = {}
+    for h in HUBS:
+        bh = res["detection_ratio_2min"]["by_hub"][h]
+        bt = res["timing"]["bracket_width_s_by_hub_daytime_block"][h]
+        cls[h] = {"dep_ratio_daytime": bh["dep"]["all"][last]["ratio"], "arr_ratio_daytime": bh["arr"]["all"][last]["ratio"],
+                  "dep_bracket_daytime": bt["dep"], "arr_bracket_daytime": bt["arr"]}
+        cls[h]["class"] = classify_hub(cls[h]["dep_ratio_daytime"], cls[h]["arr_ratio_daytime"], bt["dep"], bt["arr"])
+    res["classification"] = cls
     out = ROOT / "backtest" / "results" / "a5b_opensky_hubs.json"
     out.write_text(json.dumps(res, indent=2, default=float))
     print(json.dumps({k: res[k] for k in ("blocks_utc", "rounds_per_block", "events_total", "timing", "credits")}, indent=1, default=float))
