@@ -5,8 +5,9 @@ Binds to the persistent Solace queue, filters each message at receive time
 process run per hour (swim/archive.py, zstd or gzip), fsyncs, and only then
 acknowledges the whole batch (dropped messages are acknowledged too).
 Writes a heartbeat file (swim/monitor.py). Exit codes: 0 clean, 2 config error,
-3 authentication failure (the consumer parks itself: it will not reconnect until
-`python -m swim.health --unpark <source>`; see --auth-exit-code).
+3 authentication failure. On a config error or auth failure the service parks IN-PROCESS (status
+`config_error` / `parked`, no connection attempts, waits until SIGTERM); an auth park resumes by itself after
+`python -m swim.health --unpark <source>`. --exit-on-park exits with 2/3 instead (manual runs).
 
 Credentials come from the .env file (SCDS_<SOURCE>_*) and are never logged:
 all log output and error strings pass through redact().
@@ -123,13 +124,20 @@ class RedactingFilter(logging.Filter):
 
 
 def setup_logging(log_file=None):
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    if log_file:  # rotating: 10 MB x 5, so an always-on process can never fill the disk with logs
+    """Console logging, or (with log_file) ONLY a rotating file: 10 MB x 5, so an always-on process can
+    never fill the disk with logs (launchd/systemd capture of stderr would be unbounded)."""
+    root = logging.getLogger()
+    if log_file:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        for h in list(root.handlers):
+            root.removeHandler(h)
         fh = logging.handlers.RotatingFileHandler(log_file, maxBytes=10_000_000, backupCount=5)
         fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-        logging.getLogger().addHandler(fh)
-    for h in logging.getLogger().handlers:
+        root.addHandler(fh)
+        root.setLevel(logging.INFO)
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    for h in root.handlers:
         if not any(isinstance(f, RedactingFilter) for f in h.filters):
             h.addFilter(RedactingFilter())
     logging.getLogger("solace").setLevel(logging.WARNING)
@@ -276,7 +284,10 @@ def consume(writer, flt, stats, deadline) -> int:
                     text = body.decode("utf-8")
                 except UnicodeDecodeError:
                     text = None
-                if text is not None:
+                if text is None:
+                    if not flt.check_binary(body):
+                        kept_body, reason = None, "drop:ladd_text"
+                else:
                     out, reason = flt.apply(props, text, now.timestamp())
                     kept_body = None if out is None else (body if out is text else out.encode("utf-8"))
                 props["_redelivered"] = msg.is_redelivered()
@@ -373,6 +384,26 @@ def blocklist_path() -> Path:
     return Path(os.environ.get("SWIM_BLOCKLIST_FILE", DATA_ROOT.parent / "ladd_blocklist.txt"))
 
 
+PARK_POLL_S = 10.0
+
+
+def hold(stats, state, err, status_dir, exit_on_park, code, resumable):
+    """Park IN-PROCESS: record the state, then wait (no reconnecting, no exit) until SIGTERM/SIGINT.
+    resumable (auth park): returns None as soon as the park marker is removed (`swim.health --unpark`),
+    so no restart is needed. Returns the exit code otherwise. With exit_on_park it returns `code` at once."""
+    stats.set_state(state, err)
+    if exit_on_park:
+        return code
+    log.error("%s: waiting (no connection attempts) until %s", state,
+              "unparked or stopped" if resumable else "stopped; fix the configuration and restart")
+    while not STOP.wait(PARK_POLL_S):
+        if resumable and not monitor.park_path(status_dir, SOURCE).exists():
+            log.info("unparked: resuming")
+            return None
+        stats.write(force=True)
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--minutes", type=float, default=None, help="stop cleanly after N minutes")
@@ -380,9 +411,9 @@ def main(argv=None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="default data/swim/<source>")
     parser.add_argument("--status-dir", type=Path, default=None, help="default data/swim/status")
     parser.add_argument("--filter-config", default=None, help="JSON, default $SWIM_FILTER_CONFIG or built-in")
-    parser.add_argument("--log-file", type=Path, default=None, help="also log to this rotating file")
-    parser.add_argument("--auth-exit-code", type=int, default=3,
-                        help="exit code after an auth failure (launchd uses 0 so KeepAlive does not respawn)")
+    parser.add_argument("--log-file", type=Path, default=None, help="log only to this rotating file")
+    parser.add_argument("--exit-on-park", action="store_true",
+                        help="manual runs: exit (2 config error, 3 auth failure/parked) instead of waiting in-process")
     parser.add_argument("--check", action="store_true", help="offline self-check; never connects")
     args = parser.parse_args(argv)
     global SOURCE
@@ -390,47 +421,51 @@ def main(argv=None) -> int:
     out = args.out or DATA_ROOT / SOURCE
     status_dir = args.status_dir or DATA_ROOT / "status"
     setup_logging(args.log_file)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: STOP.set())
 
     from dotenv import load_dotenv
     load_dotenv(ENV_PATH)
     load_dotenv(ENV_PATH.with_name(ENV_PATH.name + ".alerts"))  # optional FLYRELY_ALERT_* settings
+    stats = monitor.Stats(SOURCE, status_dir)
+
+    def config_error(msg):
+        log.error("%s", msg)
+        return hold(stats, "config_error", msg, status_dir, args.exit_on_park, 2, resumable=False)
+
     try:
         flt_cfg = filters.load_config(args.filter_config)[SOURCE]
     except (OSError, ValueError) as e:
-        log.error("filter config: %s", type(e).__name__)
-        return 2
+        return config_error(f"filter config: {type(e).__name__}")
     if args.check:
         return self_check(SOURCE, out, flt_cfg)
     missing = [k for k in secret_keys([SOURCE]) if not os.environ.get(k)]
     if missing:
-        log.error("missing settings: %s", ", ".join(missing))
-        return 2
+        return config_error("missing settings: " + ", ".join(missing))
     try:
         require_tcps(os.environ[f"SCDS_{SOURCE.upper()}_URL"])
         compression_level()
         codec = archive.resolve_codec(os.environ.get("SWIM_ARCHIVE_CODEC", "auto"))
     except (ConfigError, ValueError) as e:
-        log.error("%s", e)
-        return 2
+        return config_error(str(e))
     warm_ip_cache()
-
-    if monitor.park_path(status_dir, SOURCE).exists():
-        log.error("PARKED after an authentication failure: not connecting. Fix the credentials, then run: "
-                  "python -m swim.health --unpark %s", SOURCE)
-        return args.auth_exit_code
 
     flt = filters.MessageFilter(SOURCE, flt_cfg, filters.Blocklist(blocklist_path()))
     writer = archive.ArchiveWriter(out, SOURCE, RUN_ID, codec, os.environ.get("SWIM_ARCHIVE_LEVEL"))
-    stats = monitor.Stats(SOURCE, status_dir, writer.codec)
+    stats.codec = writer.codec
     log.info("source=%s archive codec=%s filter=%s", SOURCE, writer.codec, "on" if flt_cfg.get("enabled", True) else "off")
 
     deadline = time.time() + args.minutes * 60 if args.minutes else None
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda *_: STOP.set())
-
     total, backoff, first = 0, 5, True
     try:
         while not STOP.is_set() and (deadline is None or time.time() < deadline):
+            if monitor.park_path(status_dir, SOURCE).exists():
+                log.error("PARKED after an authentication failure: not connecting. Fix the credentials, then run: "
+                          "python -m swim.health --unpark %s", SOURCE)
+                r = hold(stats, "parked", "authentication failure", status_dir, args.exit_on_park, 3, resumable=True)
+                if r is not None:
+                    return r
+                continue
             if not first:
                 stats.reconnect()
             first = False
@@ -442,9 +477,8 @@ def main(argv=None) -> int:
             except AuthError as e:
                 log.error("%s", e)
                 monitor.park(status_dir, SOURCE, "authentication failure")
-                stats.set_state("parked", "authentication failure")
                 alert_auth_failure(SOURCE)
-                return args.auth_exit_code
+                continue  # the loop head parks (waits) before any further connection attempt
             except Exception as e:
                 err = f"{type(e).__name__}: {redact(str(e))[:200]}"
                 log.warning("transient error (%s): reconnecting in %ss", err, backoff)

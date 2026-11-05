@@ -16,7 +16,8 @@
     "airline_mode": "carriers",
     "extra_carriers": [],
     "track_interval_min": 5,
-    "keep_message_types": []
+    "keep_message_types": [],
+    "keep_cancellations": true
   },
   "stdds": {"enabled": false}
 }

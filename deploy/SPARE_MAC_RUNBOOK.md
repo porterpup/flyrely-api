@@ -43,10 +43,11 @@ Apple's system Python is too old or absent, and Homebrew has dropped old macOS v
 universal2 installer for 3.11.9 supports macOS 10.9 and later and runs natively on Intel and Apple Silicon.
 
 ```sh
-ssh $MAC 'cd /tmp && curl -fLO https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg && md5 python-3.11.9-macos11.pkg'
+ssh $MAC 'cd /tmp && curl -fLO https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg && pkgutil --check-signature python-3.11.9-macos11.pkg'
 ```
-Compare the printed MD5 with the one listed on https://www.python.org/downloads/release/python-3119/ (macOS 64-bit
-universal2 installer). Do not continue on a mismatch.
+Check the signature, not just a checksum: the output must say `Status: signed by a developer certificate issued by
+Apple` and name `Developer ID Installer: Python Software Foundation`. Do not continue otherwise. (The MD5 on
+https://www.python.org/downloads/release/python-3119/ is a secondary cross-check: `md5 python-3.11.9-macos11.pkg`.)
 
 ```sh
 ssh -t $MAC 'sudo installer -pkg /tmp/python-3.11.9-macos11.pkg -target /'     # [SEAN TTY]
@@ -92,12 +93,16 @@ T=$(mktemp -d) && umask 077 && grep -E '^SCDS_(TFMS|SFDPS)_' .env > "$T/swim.env
   && scp -q "$T/swim.env" $MAC:flyrely-api/.env && rm -rf "$T"
 ssh $MAC 'chmod 600 ~/flyrely-api/.env && grep -c "^SCDS_" ~/flyrely-api/.env'      # prints a COUNT only; expect 10
 ```
-Alert channel (after Sean picks one): put only the `FLYRELY_ALERT_*` variables from `alerts.py` in a separate
-`~/flyrely-api/.env.alerts` (mode 600) on the Mac, for example ntfy:
+Alert channel (after Sean picks one). **Secrets never go through chat or Claude's commands.** The ntfy topic is itself a
+secret (anyone who knows it can read and post to it), so choose a long random one; SMTP passwords and Discord webhook URLs
+are secrets too. Sean types them himself, in his own terminal, into an editor on the Mac:
 ```sh
-ssh $MAC 'umask 077; printf "FLYRELY_ALERT_NTFY_TOPIC=%s\n" "<topic>" > ~/flyrely-api/.env.alerts'
+ssh -t $MAC 'umask 077; touch ~/flyrely-api/.env.alerts; nano ~/flyrely-api/.env.alerts'     # [SEAN TTY]
 ```
-Test the channel without touching SWIM. It prints the list of channels that worked (an empty list means none is configured):
+He adds only the `FLYRELY_ALERT_*` lines from the top of `alerts.py` (for example `FLYRELY_ALERT_NTFY_TOPIC=...`, or
+`FLYRELY_ALERT_DISCORD_WEBHOOK=...`, or the `FLYRELY_ALERT_SMTP_*` set), saves, and tells Claude only "done". Claude then
+checks the file exists with mode 600 (`ssh $MAC 'ls -l ~/flyrely-api/.env.alerts'`) and runs the test below. Test the channel
+without touching SWIM; it prints the list of channels that worked (an empty list means none is configured):
 ```sh
 ssh $MAC 'cd ~/flyrely-api && venv/bin/python -c "import alerts, dotenv; dotenv.load_dotenv(\".env.alerts\"); print(alerts.send_alert(\"FlyRely test\", \"spare Mac alert test\"))"'
 ```
@@ -126,13 +131,16 @@ them: one consumer process per source, a health check every 5 minutes, retention
 unchanged files are left alone and their services are not restarted; `--uninstall` removes them (never touches `data/`).
 LaunchAgent alternative (only if the Mac auto-logs-in; no sudo): `--mode agent`.
 
-Behaviour to rely on: `KeepAlive` with `SuccessfulExit=false` restarts a crashed consumer, at most once per 60 s
-(`ThrottleInterval`). An authentication failure makes the consumer write a park marker, send one alert, and exit **0**, so
-launchd does not respawn it; on every later start it refuses to connect. After fixing the credentials:
+Behaviour to rely on: the plist uses plain `KeepAlive` (restart whenever the process dies) with `ThrottleInterval` 60,
+so a crash loop restarts at most once a minute. An authentication failure or a configuration error does **not** exit: the
+consumer parks in-process (status `parked` or `config_error`, no connection attempts, one alert for auth failures; the health
+check also alerts) and waits. After fixing credentials, Sean or Claude only runs the unpark, and the waiting process resumes by itself
+within about 10 seconds (no restart):
 ```sh
 ssh $MAC 'cd ~/flyrely-api && venv/bin/python -m swim.health --unpark tfms'
-ssh -t $MAC 'sudo launchctl kickstart -k system/com.flyrely.swim.tfms'     # [SEAN TTY]
 ```
+After fixing a configuration error (`.env`, filter config) restart the service:
+`ssh -t $MAC 'sudo launchctl kickstart -k system/com.flyrely.swim.tfms'` **[SEAN TTY]**.
 
 Verify (give it two minutes):
 ```sh
@@ -162,7 +170,7 @@ is still readable (`ssh $MAC 'cd ~/flyrely-api && venv/bin/python -m swim.inspec
   14 days and never the newest day of a source.
 - Disk: the health check and retention alert below `SWIM_MIN_FREE_GB` (default 10).
 - Updating code: repeat the `git archive | tar -x` of step 3 (it does not touch `.env`, `.env.alerts`, `data/` or `venv/`), then
-  `sudo launchctl kickstart -k system/com.flyrely.swim.<source>`. After changing `deploy/templates/`, re-run the installer.
+  `sudo launchctl kickstart -k system/com.flyrely.swim.<source>` **[SEAN TTY]** (via `ssh -t`). After changing `deploy/templates/`, re-run the installer.
 - Filter changes: set `SWIM_FILTER_CONFIG` (see `deploy/filter.example.json`), or edit the defaults in `swim/filters.py`.
 - LADD list: `deploy/LADD_BLOCKLIST.md`.
 
@@ -181,7 +189,8 @@ systemctl status flyrely-swim-tfms flyrely-swim-sfdps; systemctl list-timers 'fl
 ```
 Trust store: on Linux the consumer uses the system directory `/etc/ssl/certs` automatically (the units also set
 `SCDS_TRUST_STORE_DIR=/etc/ssl/certs`); the `ca-certificates` package must be installed. The units use `Restart=on-failure`,
-`RestartSec=15`, a start limit of 20 per 15 minutes, and `RestartPreventExitStatus=2 3`: exit 3 (authentication failure) and
-2 (configuration error) are never restarted. Unpark with `python -m swim.health --unpark <source>`, then
+`RestartSec=15` and a start limit of 20 per 15 minutes. As on macOS, authentication failures and configuration errors park
+in-process (the unit stays active and waits), so there is no restart loop; `RestartPreventExitStatus=2 3` is only a backstop. Unpark with
+`python -m swim.health --unpark <source>` (the process resumes by itself); restart after a configuration fix:
 `sudo systemctl restart flyrely-swim-<source>`. For user-level units without sudo use `--mode user` plus
 `sudo loginctl enable-linger $(id -un)`. Reboot test: `sudo reboot`, then the checks of step 8.

@@ -23,6 +23,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -73,6 +74,8 @@ def build(opts) -> list:
             label = f"{LABEL_PREFIX}.{kind}"
             files.append(("job", label, d / f"{label}.plist", plist(tmpl, label)))
     else:
+        sd = lambda v: v.replace("%", "%%")  # systemd specifier escape; quotes are in the templates
+        base = {k: sd(v) for k, v in base.items()}
         if mode == "system":
             d = Path(opts.out_dir) if opts.out_dir else Path("/etc/systemd/system")
             user_line, wanted = f"User={opts.user}\n", "multi-user.target"
@@ -107,6 +110,19 @@ def launchd_domain(opts) -> str:
     return "system" if opts.mode == "daemon" else f"gui/{os.getuid()}"
 
 
+def wait_unloaded(dom, label, dry, tries=30):
+    """bootout can return before the old process has exited; starting the new one too early fails or
+    leaves two consumers on one queue. Poll until launchd no longer knows the job."""
+    if dry:
+        print(f"  (would wait up to {tries}s until {dom}/{label} is unloaded)")
+        return
+    for _ in range(tries):
+        if subprocess.run(["launchctl", "print", f"{dom}/{label}"], capture_output=True).returncode != 0:
+            return
+        time.sleep(1)
+    raise SystemExit(f"{label} is still loaded {tries}s after bootout; not starting a second copy")
+
+
 def activate(opts, files, changed, existing_changed, dry):
     if opts.no_load:
         print("--no-load: not loading anything")
@@ -114,22 +130,31 @@ def activate(opts, files, changed, existing_changed, dry):
     if opts.platform == "macos":
         dom = launchd_domain(opts)
         for kind, label, path, _ in files:
-            if label in changed or run(["launchctl", "print", f"{dom}/{label}"], dry) != 0:
-                run(["launchctl", "bootout", f"{dom}/{label}"], dry)  # fine if it was not loaded
-                run(["launchctl", "bootstrap", dom, str(path)], dry, check=True)
-            else:
-                print(f"  {label}: already loaded and unchanged")
-            if kind == "service":
+            if dry:
+                if label in changed:
+                    print(f"  {label}: would be (re)loaded")
+                else:
+                    print(f"  {label}: unchanged; at run time it is loaded only if launchctl does not already have it")
                 run(["launchctl", "enable", f"{dom}/{label}"], dry)
+                run(["launchctl", "bootstrap", dom, str(path)], dry)
+                continue
+            loaded = run(["launchctl", "print", f"{dom}/{label}"], dry) == 0
+            if loaded and label not in changed:
+                print(f"  {label}: already loaded and unchanged")
+                continue
+            if loaded:
+                run(["launchctl", "bootout", f"{dom}/{label}"], dry)
+                wait_unloaded(dom, label, dry)
+            run(["launchctl", "enable", f"{dom}/{label}"], dry)  # enable first, so bootstrap cannot be refused
+            run(["launchctl", "bootstrap", dom, str(path)], dry, check=True)
     else:
         sc = ["systemctl"] + (["--user"] if opts.mode == "user" else [])
         run(sc + ["daemon-reload"], dry, check=True)
         for kind, name, _, _ in files:
             if kind in ("service", "timer"):
-                verb = ["restart"] if name in existing_changed and kind == "service" else []
                 run(sc + ["enable", "--now", name], dry, check=True)
-                if verb:
-                    run(sc + verb + [name], dry, check=True)
+                if name in existing_changed and kind == "service":
+                    run(sc + ["restart", name], dry, check=True)
 
 
 def install(opts) -> int:
@@ -175,6 +200,8 @@ def uninstall(opts) -> int:
         print(f"{'would remove' if dry else 'removing'} {path}")
         if not dry and path.exists():
             path.unlink()
+    if opts.platform == "linux":
+        run(["systemctl"] + (["--user"] if opts.mode == "user" else []) + ["daemon-reload"], dry)
     return 0
 
 
@@ -207,6 +234,9 @@ def parse(argv=None):
     o.repo = o.repo.resolve()
     o.env_file = o.env_file or o.repo / ".env"
     o.log_dir = o.log_dir or o.repo / "logs"
+    for v in (o.python, o.repo, o.env_file, o.log_dir):
+        if any(ch in str(v) for ch in '"\n'):
+            ap.error("paths must not contain double quotes or newlines")
     if o.retention_days < 1:
         ap.error("--retention-days must be at least 1")
     if (o.mode in ("daemon", "system")) and not o.user:

@@ -13,10 +13,6 @@
         <string>__SOURCE__</string>
         <string>--log-file</string>
         <string>__LOG_DIR__/swim-__SOURCE__.log</string>
-        <!-- After an authentication failure the consumer parks itself and exits 0, so the
-             KeepAlive rule below (restart only after a NON-zero exit) does not respawn it. -->
-        <string>--auth-exit-code</string>
-        <string>0</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO__</string>
@@ -29,11 +25,11 @@
     </dict>
     <key>RunAtLoad</key>
     <true/>
+    <!-- Plain KeepAlive: restart whenever the process dies. The consumer never exits on its own for an
+         authentication failure or a configuration error: it parks IN-PROCESS (status "parked" /
+         "config_error", no connection attempts) and waits, so there is nothing to respawn. -->
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
     <!-- at most one (re)start per minute, so a crash loop cannot hammer SWIM -->
     <key>ThrottleInterval</key>
     <integer>60</integer>

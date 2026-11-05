@@ -227,7 +227,8 @@ def swim_env(monkeypatch, tmp_path):
 
 
 def run_main(tmp_path, *extra):
-    return consumer.main(["--source", "tfms", "--out", str(tmp_path / "out"), "--status-dir", str(tmp_path / "st"), *extra])
+    return consumer.main(["--source", "tfms", "--out", str(tmp_path / "out"), "--status-dir", str(tmp_path / "st"),
+                          "--exit-on-park", *extra])
 
 
 def test_auth_failure_parks_alerts_once_and_never_retries(swim_env, monkeypatch):
@@ -244,10 +245,8 @@ def test_auth_failure_parks_alerts_once_and_never_retries(swim_env, monkeypatch)
     assert json.loads(monitor.status_path(swim_env / "st", "tfms").read_text())["state"] == "parked"
     # the service manager restarts it (or the Mac reboots): it must refuse to connect again
     assert run_main(swim_env) == 3 and calls == [1]
-    # launchd variant exits 0 so KeepAlive(SuccessfulExit=false) does not respawn
-    assert run_main(swim_env, "--auth-exit-code", "0") == 0 and calls == [1]
     monitor.unpark(swim_env / "st", "tfms")
-    assert run_main(swim_env) == 3 and calls == [1, 1]  # after unpark it tries once more
+    assert run_main(swim_env) == 3 and calls == [1, 1]  # after unpark it tries once more (and parks again)
 
 
 def test_transient_errors_count_reconnects_and_back_off(swim_env, monkeypatch):
@@ -359,9 +358,9 @@ def test_installer_renders_macos_agent_and_daemon_plists(tmp_path):
             assert pl["Label"] == label and "__" not in content
             assert ("UserName" in pl) == (mode == "daemon")
         svc = plistlib.loads(files[0][3].encode())
-        assert svc["KeepAlive"] == {"SuccessfulExit": False} and svc["ThrottleInterval"] >= 30
+        assert svc["KeepAlive"] is True and svc["ThrottleInterval"] >= 30
         args = svc["ProgramArguments"]
-        assert args[args.index("--auth-exit-code") + 1] == "0"  # parked == clean exit == no respawn
+        assert "--exit-on-park" not in args  # the service parks in-process; it never exits on auth/config errors
         assert args[:3] == ["/opt/venv/bin/python", "-m", "swim.consumer"] and "tfms" in args
         assert svc["EnvironmentVariables"]["FLYRELY_ENV_FILE"] == str(tmp_path.resolve() / ".env")
 
@@ -375,6 +374,7 @@ def test_installer_renders_systemd_units(tmp_path):
     svc = files["flyrely-swim-tfms.service"]
     assert "RestartPreventExitStatus=2 3" in svc and "Restart=on-failure" in svc and "User=ubuntu" in svc
     assert "SCDS_TRUST_STORE_DIR=/etc/ssl/certs" in svc and "--source tfms" in svc
+    assert 'ExecStart="/srv/venv/bin/python" -m swim.consumer' in svc and 'Environment="FLYRELY_ENV_FILE=' in svc
     assert "__" not in "".join(files.values())
     user_mode = {f[1]: f[3] for f in inst.build(opts("--platform", "linux", "--mode", "user", "--repo", str(tmp_path)))}
     assert "User=" not in user_mode["flyrely-swim-tfms.service"] and "default.target" in user_mode["flyrely-swim-tfms.service"]
@@ -496,3 +496,168 @@ def test_consume_filters_archives_then_acks_everything(tmp_path, monkeypatch):
     assert len(recs) == 2 and recs[0]["dedupe"]["rgmid"] == "id-1"
     assert stats.received == 3 and stats.kept == 2 and stats.reasons["drop:not_airline"] == 1
     assert json.loads(monitor.status_path(tmp_path / "st", "tfms").read_text())["state"] == "connected"
+
+
+# ------------------------------------------------ in-process parking
+def test_auth_park_waits_in_process_and_resumes_after_unpark(swim_env, monkeypatch):
+    import threading
+    stop = threading.Event()
+    monkeypatch.setattr(consumer, "STOP", stop)
+    monkeypatch.setattr(consumer, "PARK_POLL_S", 0.05)
+    monkeypatch.setattr(consumer, "alert_auth_failure", lambda s: None)
+    calls = []
+
+    def fake_consume(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise consumer.AuthError("authentication failed")
+        stop.set()  # second attempt (after unpark): stop the test
+        return 0
+    monkeypatch.setattr(consumer, "consume", fake_consume)
+    st = swim_env / "st"
+    seen = {}
+
+    def operator():
+        for _ in range(200):
+            if monitor.park_path(st, "tfms").exists():
+                break
+            threading.Event().wait(0.02)
+        threading.Event().wait(0.3)  # the process must be WAITING, not retrying
+        seen["calls_while_parked"] = len(calls)
+        seen["state"] = json.loads(monitor.status_path(st, "tfms").read_text())["state"]
+        monitor.unpark(st, "tfms")
+    t = threading.Thread(target=operator)
+    t.start()
+    rc = consumer.main(["--source", "tfms", "--out", str(swim_env / "out"), "--status-dir", str(st)])  # no --exit-on-park
+    t.join()
+    assert rc == 0 and seen == {"calls_while_parked": 1, "state": "parked"} and len(calls) == 2
+
+
+def test_config_error_parks_in_process_with_status(swim_env, monkeypatch):
+    import threading
+    monkeypatch.delenv("SCDS_TFMS_PASSWORD")
+    stop = threading.Event()
+    monkeypatch.setattr(consumer, "STOP", stop)
+    monkeypatch.setattr(consumer, "PARK_POLL_S", 0.05)
+    monkeypatch.setattr(consumer, "consume", lambda *a, **k: pytest.fail("must not connect"))
+    threading.Timer(0.3, stop.set).start()
+    rc = consumer.main(["--source", "tfms", "--out", str(swim_env / "out"), "--status-dir", str(swim_env / "st")])
+    assert rc == 0  # exits only because it was stopped (SIGTERM)
+    st = json.loads(monitor.status_path(swim_env / "st", "tfms").read_text())
+    assert st["state"] == "config_error" and "SCDS_TFMS_PASSWORD" in st["last_error"] and "p-test" not in json.dumps(st)
+    assert "tfms:config" in health.check(swim_env / "st", ["tfms"], swim_env, st["updated_epoch"], min_free_gb=0)
+
+
+def test_config_error_exit_code_in_manual_mode(swim_env, monkeypatch):
+    monkeypatch.delenv("SCDS_TFMS_USER")
+    assert run_main(swim_env) == 2
+
+
+def test_log_file_disables_console_duplicate(tmp_path):
+    import logging
+    root = logging.getLogger()
+    saved = list(root.handlers)
+    try:
+        consumer.setup_logging(tmp_path / "l" / "swim.log")
+        kinds = [type(h).__name__ for h in root.handlers]
+        assert kinds == ["RotatingFileHandler"]  # nothing goes to stderr, so launchd's stderr file stays tiny
+    finally:
+        for h in list(root.handlers):
+            root.removeHandler(h)
+        for h in saved:
+            root.addHandler(h)
+
+
+# -------------------------------------------------- write error handling
+def test_write_error_abandons_file_and_continues_in_a_new_one(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from swim import inspect_tfms
+    ts = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+    w = archive.ArchiveWriter(tmp_path, "tfms", "r", "gzip")
+    rec = lambda n: [(ts, consumer.encode_record(ts, {}, f"<a n='{n}'/>".encode()))]
+    w.write_batch(rec(1))
+    real = archive.durable_sync
+    calls = {"n": 0}
+
+    def flaky(fd):
+        calls["n"] += 1
+        raise OSError(5, "I/O error")
+    monkeypatch.setattr(archive, "durable_sync", flaky)
+    with pytest.raises(OSError):
+        w.write_batch(rec(2))  # raised: the caller must not ack this batch
+    monkeypatch.setattr(archive, "durable_sync", real)
+    w.write_batch(rec(3))
+    w.close()
+    files = sorted(p.name for p in tmp_path.glob("*/*.jsonl.gz"))
+    assert len(files) == 2 and files[1].endswith("_s1.jsonl.gz")
+    bodies = [r["body"] for r in inspect_tfms.iter_records(tmp_path)]
+    assert "<a n='1'/>" in bodies and "<a n='3'/>" in bodies  # later data is readable despite the torn earlier file
+
+
+def test_durable_sync_uses_fullfsync_on_macos_and_falls_back(monkeypatch, tmp_path):
+    import types
+    monkeypatch.setattr(archive.sys, "platform", "darwin")
+    seen = []
+    fake = types.SimpleNamespace(F_FULLFSYNC=51, fcntl=lambda fd, op: seen.append(("fcntl", op)))
+    monkeypatch.setitem(sys.modules, "fcntl", fake)
+    monkeypatch.setattr(archive.os, "fsync", lambda fd: seen.append(("fsync",)))
+    archive.durable_sync(3)
+    assert seen == [("fcntl", 51)]
+    fake.fcntl = lambda fd, op: (_ for _ in ()).throw(OSError(25, "not supported"))
+    archive.durable_sync(3)
+    assert seen[-1] == ("fsync",)
+    # directories take the same path
+    seen.clear()
+    fake.fcntl = lambda fd, op: seen.append(("fcntl", op))
+    archive._fsync_dir(tmp_path)
+    assert seen == [("fcntl", 51)]
+
+
+def test_installer_dry_run_does_not_claim_loaded(tmp_path, capsys):
+    o = opts("--platform", "macos", "--mode", "agent", "--repo", str(tmp_path), "--out-dir", str(tmp_path / "x"),
+             "--sources", "tfms", "--dry-run")
+    inst.install(o)
+    out = capsys.readouterr().out
+    assert "already loaded" not in out and "launchctl enable" in out and out.index("launchctl enable") < out.index("launchctl bootstrap")
+
+
+def test_installer_reload_waits_and_enables_before_bootstrap(tmp_path, monkeypatch):
+    cmds, state = [], {"loaded": True}
+
+    def fake_run(c, **k):
+        cmds.append(" ".join(c[1:3]))
+        if c[1] == "print":
+            return type("R", (), {"returncode": 0 if state["loaded"] else 1, "stdout": "", "stderr": ""})()
+        if c[1] == "bootout":
+            state["loaded"] = False
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    monkeypatch.setattr(inst.subprocess, "run", fake_run)
+    monkeypatch.setattr(inst, "launchd_domain", lambda o: "gui/501")
+    monkeypatch.setattr(inst.time, "sleep", lambda s: None)
+    o = opts("--platform", "macos", "--mode", "agent", "--repo", str(tmp_path), "--out-dir", str(tmp_path / "x"),
+             "--sources", "tfms", "--log-dir", str(tmp_path / "l"))
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "com.flyrely.swim.tfms.plist").write_text("old")  # changed file: must reload
+    inst.install(o)
+    seq = [c for c in cmds if c.startswith(("bootout", "enable", "bootstrap"))]
+    assert seq.index("bootout gui/501/com.flyrely.swim.tfms") < seq.index("enable gui/501/com.flyrely.swim.tfms") \
+        < seq.index("bootstrap gui/501")
+    assert cmds.index("print gui/501/com.flyrely.swim.tfms") < cmds.index("bootout gui/501/com.flyrely.swim.tfms")
+
+
+def test_installer_uninstall_reloads_systemd(tmp_path, monkeypatch):
+    cmds = []
+    monkeypatch.setattr(inst.subprocess, "run", lambda c, **k: (cmds.append(" ".join(c)), type("R", (), {"returncode": 0})())[1])
+    o = opts("--platform", "linux", "--mode", "user", "--repo", str(tmp_path), "--out-dir", str(tmp_path / "u"), "--uninstall")
+    inst.main(["--platform", "linux", "--mode", "user", "--repo", str(tmp_path), "--out-dir", str(tmp_path / "u"), "--uninstall"])
+    assert cmds[-1] == "systemctl --user daemon-reload"
+
+
+def test_systemd_paths_with_spaces_and_percent_are_quoted(tmp_path):
+    repo = tmp_path / "my repo %h"
+    repo.mkdir()
+    o = opts("--platform", "linux", "--mode", "user", "--repo", str(repo), "--python", str(repo / "venv" / "bin" / "python"))
+    svc = {f[1]: f[3] for f in inst.build(o)}["flyrely-swim-tfms.service"]
+    assert f'ExecStart="{str(repo).replace("%", "%%")}/venv/bin/python"' in svc
+    with pytest.raises(SystemExit):
+        opts("--platform", "linux", "--mode", "user", "--repo", str(tmp_path), "--python", '/a"b/python')

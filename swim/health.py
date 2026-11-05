@@ -47,6 +47,9 @@ def check(status_dir: Path, sources, root: Path, now: float, max_silence_min=10.
         except (OSError, ValueError):
             problems[f"{src}:nostatus"] = f"{src}: no readable status file (consumer never started, or it is down)."
             continue
+        if st.get("state") == "config_error":
+            problems[f"{src}:config"] = f"{src}: configuration error ({st.get('last_error')}). The consumer is waiting; fix it and restart the service."
+            continue
         upd = st.get("updated_epoch") or 0
         if now - upd > stale_status_min * 60:
             problems[f"{src}:down"] = f"{src}: status not updated for {(now - upd) / 60:.0f} min (consumer down or hung)."

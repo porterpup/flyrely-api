@@ -11,8 +11,16 @@ has the hook; **the list itself is not available yet. Obtaining it is Sean's job
   matter. An identifier can be a callsign (`UAL123`), a registration (`N750EC`) or a 24-bit ICAO hex
   address (`AA1A70`).
 - Changes are picked up within about 60 seconds. No restart is needed.
-- A flight whose callsign, registration or hex address is on the list is dropped at receive time
-  (the message is acknowledged to the broker, but never written), before any other filter rule.
+- Where it applies (it runs before every other filter rule, and also with `SWIM_FILTER=off`):
+  - **TFMS and SFDPS flight messages are batches.** The list is applied **per flight element**: a listed flight
+    is removed from the batch and the other flights in it are kept (or the whole message is dropped if it was the
+    only flight). A flight matches on callsign, registration or hex address, whichever the message carries.
+  - **Everything else** (STDDS, messages that cannot be parsed, binary bodies, non-flight SFDPS data, or any
+    message when the filter is off and it is not a flight message) gets a **best-effort raw-text scan**: if any
+    listed identifier appears anywhere in the text as a whole token, the whole message is dropped. This can
+    over-drop (a callsign mentioned in an unrelated field) but should not under-drop.
+- Dropped messages are acknowledged to the broker but never written.
+- This is a best-effort filter, not a guarantee. See the limits below.
 
 ## Limits to be aware of (be honest with the FAA about these)
 1. **TFMS messages carry only the callsign** (no registration or hex address). A list that contains only

@@ -1,7 +1,11 @@
 """Receive-time filtering for SWIM messages (stdlib only; regex on the raw XML, no full parse).
 
 What is kept, per source (all configurable, see deploy/filter.example.json):
-  TFMS   airline flights only. Keep FlightTimes, FlightCreate/Modify/ScheduleActivate, flight plans,
+  TFMS   messages are BATCHES: one message holds several <fltdMessage> flight elements (often different
+         flights). Each flight element is filtered on its own; the message is re-assembled from the kept
+         elements (kept elements are byte-identical to the original, the envelope and any text between
+         elements is preserved, so it stays well-formed XML).
+         Airline flights only. Keep FlightTimes, FlightCreate/Modify/ScheduleActivate, flight plans,
          amendments, cancellations, departure/arrival information; ALL flow data and Status.
          Track (trackInformation) updates are thinned to 1 per flight per `track_interval_min`
          (0 = drop them). Other flight message types are dropped.
@@ -11,8 +15,11 @@ What is kept, per source (all configurable, see deploy/filter.example.json):
          (many flights in one message) are split per flight and re-assembled from the kept flights.
   STDDS  pass-through (only the block list applies) until its messages have been profiled.
 
-LADD hook: if the block-list file exists, flights on it are dropped first, whatever else applies
-(see deploy/LADD_BLOCKLIST.md). Anything unparseable is KEPT (fail open) and counted.
+LADD hook: if the block-list file exists, flights on it are dropped first, whatever else applies, on every
+path: per flight element in TFMS/SFDPS batches (also with SWIM_FILTER=off), and by a raw-text scan of the whole
+message for STDDS, unparseable messages, binary bodies and other non-flight data (best effort: a hit drops the
+whole message). Flow messages are kept whole (see deploy/LADD_BLOCKLIST.md). Anything else unparseable is KEPT
+(fail open) and counted.
 """
 import json
 import logging
@@ -44,7 +51,7 @@ DEFAULTS = {
              "keep_types": TFMS_KEEP_TYPES, "track_types": TFMS_TRACK_TYPES, "track_interval_min": 5,
              "keep_flow": True, "keep_status": True},
     "sfdps": {"enabled": True, "airlines_only": True, "airline_mode": "carriers", "extra_carriers": [],
-              "track_interval_min": 5, "keep_message_types": []},
+              "track_interval_min": 5, "keep_message_types": [], "keep_cancellations": True},
     "stdds": {"enabled": False},
 }
 
@@ -52,6 +59,8 @@ CALLSIGN_RE = re.compile(r"^([A-Z]{3})(\d{1,4})([A-Z]{0,2})$")
 ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 TFMS_HEAD_RE = re.compile(r"<(?:\w+:)?fltdMessage\b([^>]*)>")
 SF_MESSAGE_RE = re.compile(r"<message\b.*?</message>", re.S)
+TFMS_BLOCK_RE = re.compile(r"<((?:\w+:)?)fltdMessage\b[^>]*(?<!/)>.*?</\1fltdMessage>", re.S)
+SF_CANCEL_RE = re.compile(r'fdpsFlightStatus="CANCELLED"')
 SF_IDENT_RE = re.compile(r'aircraftIdentification="([^"]*)"')
 SF_REG_RE = re.compile(r'\bregistration="([^"]*)"')
 SF_ADDR_RE = re.compile(r'\baircraftAddress="([^"]*)"')
@@ -86,6 +95,7 @@ class Blocklist:
         self.path = Path(path) if path else None
         self.check_s, self._next, self._mtime = check_s, 0.0, None
         self.ids: frozenset = frozenset()
+        self._rx = None
         self.reload(force=True)
 
     def reload(self, force=False):
@@ -100,7 +110,7 @@ class Blocklist:
         except OSError:
             if self._mtime is not None:
                 log.info("block list removed; no LADD filtering")
-            self._mtime, self.ids = None, frozenset()
+            self._mtime, self.ids, self._rx = None, frozenset(), None
             return
         if mtime == self._mtime:
             return
@@ -109,9 +119,16 @@ class Blocklist:
             for line in self.path.read_text(errors="replace").splitlines():
                 ids.update(t.upper() for t in re.split(r"[\s,;]+", line.split("#", 1)[0]) if t)
             self.ids, self._mtime = frozenset(ids), mtime
+            self._rx = (re.compile(r"(?<![A-Z0-9])(?:" + "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True))
+                                   + r")(?![A-Z0-9])", re.I) if ids else None)
             log.info("block list loaded: %d identifiers", len(ids))
         except OSError:
             log.warning("block list unreadable; keeping the previous one")
+
+    def scan(self, text: str) -> bool:
+        """Best effort: does any listed identifier appear as a whole token anywhere in the raw text?"""
+        self.reload()
+        return bool(self._rx and self._rx.search(text))
 
     def hit(self, *idents) -> bool:
         self.reload()
@@ -168,6 +185,18 @@ class MessageFilter:
         _trim(self._last_track)
         return True
 
+    def _guard(self, text, keep_reason):
+        """Keep `text` unless the block list matches anywhere in it (best effort, whole message)."""
+        if self.blocklist.scan(text):
+            return None, "drop:ladd_text"
+        return text, keep_reason
+
+    def check_binary(self, raw: bytes) -> bool:
+        """True = keep. Used for non-UTF-8 bodies: best-effort block-list scan of the raw bytes."""
+        keep = not self.blocklist.scan(raw.decode("latin-1"))
+        self.counts["keep:binary" if keep else "drop:ladd_text"] += 1
+        return keep
+
     def apply(self, props: dict, body: str, now: float):
         try:
             if self.source == "tfms":
@@ -175,83 +204,105 @@ class MessageFilter:
             elif self.source == "sfdps":
                 out, reason = self._sfdps(props, body, now)
             else:
-                out, reason = self._passthrough(body)
-        except Exception as e:  # never lose data because of a filter bug
-            out, reason = body, f"keep:filter_error:{type(e).__name__}"
+                out, reason = self._guard(body, "keep:passthrough")
+        except Exception as e:  # never lose data because of a filter bug (the block list still gets a try)
+            try:
+                out, reason = self._guard(body, f"keep:filter_error:{type(e).__name__}")
+            except Exception:
+                out, reason = body, f"keep:filter_error:{type(e).__name__}"
         self.counts[reason] += 1
         return out, reason
 
-    def _passthrough(self, body):
-        return body, "keep:passthrough"
+    def _assemble(self, body, blocks, kept, why):
+        """Re-serialise a batch from its kept elements (byte-identical elements, original envelope/separators)."""
+        best = next((r for r in why if r.startswith("keep")), None)
+        if not kept:
+            return None, "drop:" + why.most_common(1)[0][0].split(":", 1)[1]
+        if len(kept) == len(blocks):
+            return body, best
+        sep = body[blocks[0].end():blocks[1].start()] if len(blocks) > 1 else ""
+        return body[:blocks[0].start()] + sep.join(kept) + body[blocks[-1].end():], best
 
     # -- TFMS
     def _tfms(self, props, body, now):
         c = self.cfg
         cls = str(props.get("TFMDataClass", ""))
-        if not c.get("enabled", True):
-            return body, "keep:filter_off"
-        if cls == "FlowInformation":
+        on = c.get("enabled", True)
+        if cls == "FlightData":
+            return self._tfms_flights(body, now, ladd_only=not on)
+        if not on:
+            return self._guard(body, "keep:filter_off")
+        if cls == "FlowInformation":  # kept whole: see deploy/LADD_BLOCKLIST.md
             return (body, "keep:flow") if c["keep_flow"] else (None, "drop:flow")
         if cls == "Status":
             return (body, "keep:status") if c["keep_status"] else (None, "drop:status")
-        if cls != "FlightData":
-            return body, "keep:other_class"
-        m = TFMS_HEAD_RE.search(body[:4000])
+        return self._guard(body, "keep:other_class")
+
+    def _tfms_flights(self, body, now, ladd_only):
+        blocks = list(TFMS_BLOCK_RE.finditer(body))
+        if not blocks:
+            return self._guard(body, "keep:unparsed")
+        kept, why = [], Counter()
+        for b in blocks:
+            r = self._tfms_block(b.group(0), now, ladd_only)
+            why[r] += 1
+            if r.startswith("keep"):
+                kept.append(b.group(0))
+        return self._assemble(body, blocks, kept, why)
+
+    def _tfms_block(self, blk, now, ladd_only):
+        c = self.cfg
+        m = TFMS_HEAD_RE.search(blk[:4000])
         if not m:
-            return body, "keep:unparsed"
+            return "drop:ladd_text" if self.blocklist.scan(blk) else "keep:unparsed"
         a = dict(ATTR_RE.findall(m.group(1)))
         acid, mtype = a.get("acid", ""), a.get("msgType", "")
         if self.blocklist.hit(acid):
-            return None, "drop:ladd"
+            return "drop:ladd"
+        if ladd_only:
+            return "keep:filter_off"
         if not self._is_airline(acid):
-            return None, "drop:not_airline"
+            return "drop:not_airline"
         if mtype in c["keep_types"]:
-            return body, "keep:" + mtype
+            return "keep:" + mtype
         if mtype in c["track_types"]:
-            if self._track_ok(a.get("flightRef") or acid, now):
-                return body, "keep:track_sample"
-            return None, "drop:track_thinned"
-        return None, "drop:type:" + (mtype or "unknown")
+            return "keep:track_sample" if self._track_ok(a.get("flightRef") or acid, now) else "drop:track_thinned"
+        return "drop:type:" + (mtype or "unknown")
 
     # -- SFDPS
     def _sfdps(self, props, body, now):
         c = self.cfg
         mtype = str(props.get("FDPS_MessageType", ""))
-        if not c.get("enabled", True):
-            return body, "keep:filter_off"
+        on = c.get("enabled", True)
         if str(props.get("FDPS_DataType", "")).upper() == "STATUS" or mtype.lower() == "status":
-            return body, "keep:status"
-        if mtype in c["keep_message_types"]:
-            return body, "keep:configured_type"
+            return self._guard(body, "keep:status" if on else "keep:filter_off")
+        if on and mtype in c["keep_message_types"]:
+            return self._guard(body, "keep:configured_type")
         blocks = list(SF_MESSAGE_RE.finditer(body))
         if not blocks:
-            if "<flight " in body:
-                return body, "keep:unparsed"
-            return body, "keep:nonflight"
+            return self._guard(body, "keep:unparsed" if "<flight " in body else "keep:nonflight")
         kept, why = [], Counter()
         for b in blocks:
-            r = self._sf_block(b.group(0), now)
+            r = self._sf_block(b.group(0), now, ladd_only=not on)
             why[r] += 1
             if r.startswith("keep"):
                 kept.append(b.group(0))
-        best = next((r for r in why if r.startswith("keep")), None)
-        if not kept:
-            return None, "drop:" + next(iter(why.most_common(1)))[0].split(":", 1)[1]
-        if len(kept) == len(blocks):
-            return body, best
-        out = body[:blocks[0].start()] + "\n    ".join(kept) + body[blocks[-1].end():]
-        return out, best
+        return self._assemble(body, blocks, kept, why)
 
-    def _sf_block(self, blk, now):
+    def _sf_block(self, blk, now, ladd_only=False):
         m = SF_IDENT_RE.search(blk)
         ident = m.group(1) if m else ""
         reg, addr = SF_REG_RE.search(blk), SF_ADDR_RE.search(blk)
         if self.blocklist.hit(ident, reg and reg.group(1), addr and addr.group(1)):
             return "drop:ladd"
+        if ladd_only:
+            return "keep:filter_off"
         if not self._is_airline(ident):
             return "drop:not_airline"
         if "<aircraftDescription" in blk:
             return "keep:flight_plan"
+        if self.cfg.get("keep_cancellations", True) and SF_CANCEL_RE.search(blk):
+            return "keep:cancellation"
         g = SF_GUFI_RE.search(blk) or SF_PLANID_RE.search(blk)
         key = g.group(1) if g else ident
         if self._new_actual(key, blk):

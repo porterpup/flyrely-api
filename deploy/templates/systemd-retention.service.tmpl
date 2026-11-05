@@ -4,7 +4,7 @@ Description=FlyRely SWIM archive retention
 [Service]
 Type=oneshot
 __USER_LINE__WorkingDirectory=__REPO__
-Environment=FLYRELY_ENV_FILE=__ENV_FILE__
-ExecStart=__PYTHON__ -m swim.retention --days __RETENTION_DAYS__ --min-free-gb __MIN_FREE_GB__ --alert
+Environment="FLYRELY_ENV_FILE=__ENV_FILE__"
+ExecStart="__PYTHON__" -m swim.retention --days __RETENTION_DAYS__ --min-free-gb __MIN_FREE_GB__ --alert
 # exit 2 = disk still low after retention (already logged and alerted)
 SuccessExitStatus=2

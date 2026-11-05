@@ -11,6 +11,7 @@ zstd is used when the `zstandard` module is importable (SWIM_ARCHIVE_CODEC=auto)
 otherwise gzip. Only the standard library is needed for gzip.
 """
 import os
+import sys
 import zlib
 from datetime import datetime
 from pathlib import Path
@@ -44,13 +45,26 @@ def default_level(codec: str) -> int:
     return 10 if codec == "zstd" else 6
 
 
+def durable_sync(fd: int):
+    """Flush to stable storage. On macOS plain fsync only reaches the drive's cache; F_FULLFSYNC asks
+    the drive to flush too. Falls back to os.fsync where F_FULLFSYNC is unsupported (some file systems)."""
+    if sys.platform == "darwin":
+        try:
+            import fcntl
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return
+        except (ImportError, AttributeError, OSError):
+            pass
+    os.fsync(fd)
+
+
 def _fsync_dir(path: Path):
     try:
         fd = os.open(str(path), os.O_RDONLY)
     except OSError:
         return
     try:
-        os.fsync(fd)
+        durable_sync(fd)
     except OSError:
         pass
     finally:
@@ -87,14 +101,22 @@ class _Stream:
         else:
             self.raw.write(self.obj.flush(zlib.Z_SYNC_FLUSH))
         self.raw.flush()
-        os.fsync(self.raw.fileno())
+        durable_sync(self.raw.fileno())
+
+    def abandon(self):
+        """Drop the file handle without finishing the stream (after an I/O error). The file keeps whatever
+        was durably written before; readers stop at the torn tail."""
+        try:
+            self.raw.close()
+        except Exception:
+            pass
 
     def close(self):
         try:
             tail = self.obj.flush(self.FINISH) if self.codec == "zstd" else self.obj.flush(zlib.Z_FINISH)
             self.raw.write(tail)
             self.raw.flush()
-            os.fsync(self.raw.fileno())
+            durable_sync(self.raw.fileno())
         finally:
             self.raw.close()
 
@@ -107,6 +129,7 @@ class ArchiveWriter:
         self.codec = resolve_codec(codec)
         self.level = int(level) if level else default_level(self.codec)
         self._streams: dict = {}  # hour key -> _Stream
+        self._seq = 0  # bumped after every write error: later data goes to a NEW file
         self.bytes_written = 0
 
     @property
@@ -115,11 +138,28 @@ class ArchiveWriter:
 
     def path_for(self, ts: datetime) -> Path:
         d = self.root / ts.strftime("%Y-%m-%d")
-        return d / f"{self.source}_{ts.strftime('%Y%m%dT%H')}_{self.run_id}{self.ext}"
+        seq = f"_s{self._seq}" if self._seq else ""
+        return d / f"{self.source}_{ts.strftime('%Y%m%dT%H')}_{self.run_id}{seq}{self.ext}"
 
     def write_batch(self, records: list) -> None:
+        """Append and fsync. On ANY error every open file is abandoned and the sequence number is bumped,
+        so the next call starts a fresh file (a failed or torn write can never sit in front of later data);
+        the error is re-raised so the caller does not ack the batch."""
         if not records:
             return
+        try:
+            self._write(records)
+        except BaseException:
+            self._abandon_all()
+            raise
+
+    def _abandon_all(self):
+        for st in self._streams.values():
+            st.abandon()
+        self._streams.clear()
+        self._seq += 1
+
+    def _write(self, records):
         by_hour = {}
         for ts, line in records:
             by_hour.setdefault(ts.strftime("%Y%m%dT%H"), []).append((ts, line))
