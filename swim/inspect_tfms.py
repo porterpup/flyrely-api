@@ -8,10 +8,10 @@ other than a small allow-list of categorical ones.
 import argparse
 import collections
 import glob
-import gzip
 import json
 import re
 import statistics
+import zlib
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +27,14 @@ TIME_FIELDS = {
     "on": {"airlineontime", "runwayarrival", "actualtimeofarrival", "actuallandingtime"},
     "in": {"airlineintime", "gatearrival", "actualonblocktime", "actualtimeofonblock"},
 }
-SKIP_PROP_WORDS = ("dest", "queue", "user", "uuid", "id", "time", "host", "breadcrumb", "codes", "count")
+# Only these categorical message properties are ever printed (everything else may hold
+# routing/queue names or identifiers).
+ALLOWED_PROPS = {
+    "MessageType", "TFMDataClass", "TFMS_CATEGORY", "msgType", "DEX_SOURCE_TYPE", "SchemaVersion",
+    "TFMSRelease", "visDomain", "sensitivity", "portalInterface",
+    "FDPS_DataType", "FDPS_Authoritative", "FDPS_Restricted", "FDPS_Classification",
+    "FDPS_OneMinFreq", "FDPS_BlockAtFAA", "FDPS_Sensitive", "propEnhancedData", "_redelivered",
+}
 
 
 def local(name: str) -> str:
@@ -141,14 +148,40 @@ def is_flight(props: dict, root) -> bool:
         "status" not in root_tag(root).lower()
 
 
+def read_lines(path):
+    """Yield text lines from a (possibly multi-member, possibly truncated) gzip file.
+    A damaged or cut-off final chunk is skipped instead of raising."""
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    buf = b""
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(1 << 20)
+            if not chunk:
+                break
+            while chunk:
+                try:
+                    out = d.decompress(chunk)
+                except zlib.error:
+                    return  # damaged data: stop reading this file
+                buf += out
+                *lines, buf = buf.split(b"\n")
+                for ln in lines:
+                    yield ln.decode("utf-8", "replace")
+                if d.eof:  # member finished; start the next one
+                    chunk = d.unused_data
+                    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                else:
+                    chunk = b""
+    # a partial trailing line (truncated chunk) is dropped on purpose
+
+
 def iter_records(directory: Path):
     for f in sorted(glob.glob(str(directory / "*" / "*.jsonl.gz"))):
-        with gzip.open(f, "rt", encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+        for line in read_lines(f):
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
 
 def pct(a, b):
@@ -180,7 +213,7 @@ def main(argv=None):
         except (KeyError, TypeError):
             pass
         for k, v in props.items():
-            if not any(w in k.lower() for w in SKIP_PROP_WORDS) and isinstance(v, (str, int, bool)):
+            if k in ALLOWED_PROPS and isinstance(v, (str, int, bool)):
                 prop_counts[k][str(v)[:40]] += 1
         root = parse(rec.get("body", ""))
         if root is None:
