@@ -74,3 +74,25 @@ def test_classify_hub_applies_preregistered_rule():
 def test_airline_callsign_pattern_is_icao_plus_one_to_four_digits():
     assert oh.AL_RE.match("DAL1234") and oh.AL_RE.match("SWA7")
     assert not oh.AL_RE.match("DAL12345") and not oh.AL_RE.match("N123AB") and not oh.AL_RE.match("DAL12A")
+
+
+def test_nearest_airport_guard_drops_events_nearer_another_airport():
+    oh.HUB_COORDS["XXX"] = (LAT, LON, ELEV)
+    spec = [(2000, 0.03, False, 200, 6)]
+    assert len(oh.detect_events(_rows(spec), "XXX", [])) == 1
+    assert oh.detect_events(_rows(spec), "XXX", [(LAT + 0.03, LON, ELEV)]).empty   # another airport sits right under the aircraft
+
+
+def test_ratio_for_expected_counts_and_mainline_regional_split():
+    def row(op, cs, L, woff):
+        return {"Origin": "XXX", "Dest": "YYY", "op": op, "cs_op": cs, "cs_mk": cs, "L": L, "n_src": 4, "woff": woff, "won": woff + 3600}
+    # DL100 ran on all 4 Augusts on date L1 (1.0 expected flight); OO500 on 2 of 4 Augusts on date L2 (0.5 expected)
+    fl = pd.DataFrame([row("DL", "DAL100", "L1", 1000)] * 4 + [row("OO", "SKW500", "L2", 1500)] * 2 + [row("DL", "DAL100", "L1", 99999)] * 4)
+    ev = pd.DataFrame([("XXX", "dep", "DAL100", 1100), ("XXX", "dep", "SKW500", 1400), ("XXX", "dep", "DAL100", 50000), ("XXX", "dep", "UAL1", 1200)],
+                      columns=["hub", "kind", "cs", "t"])
+    out = oh.ratio_for(ev, fl, [(0, 2000)], ["XXX"], "t")["XXX"]["dep"]
+    assert out["all"]["block0"] == {"detected": 3, "expected": 1.5}   # UAL1 is counted: protocol numerator is any airline callsign
+    assert out["mainline"]["block0"] == {"detected": 2, "expected": 1.0}
+    assert out["regional"]["block0"] == {"detected": 1, "expected": 0.5}
+    sched = oh.ratio_for(ev, fl, [(0, 2000)], ["XXX"], "t", numerator="any_schedule", sched_any={"DAL100", "SKW500"})["XXX"]["dep"]
+    assert sched["all"]["block0"]["detected"] == 2

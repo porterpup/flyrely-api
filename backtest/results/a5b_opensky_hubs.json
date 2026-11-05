@@ -1313,65 +1313,65 @@
         "p90": 174.89999999999998
       }
     },
-    "bracket_width_s_daytime_block": {
+    "bracket_width_s_daytime_interior": {
       "dep": {
-        "n": 605,
-        "median": 132.0,
-        "p90": 329.20000000000005
+        "n": 310,
+        "median": 131.0,
+        "p90": 359.30000000000007
       },
       "arr": {
-        "n": 773,
-        "median": 119.0,
-        "p90": 198.4000000000002
+        "n": 414,
+        "median": 119.5,
+        "p90": 189.69999999999976
       }
     },
-    "bracket_width_s_by_hub_daytime_block": {
+    "bracket_width_s_by_hub_daytime_interior": {
       "ATL": {
         "dep": {
-          "n": 116,
-          "median": 208.0,
-          "p90": 505.0
+          "n": 52,
+          "median": 316.5,
+          "p90": 538.4
         },
         "arr": {
-          "n": 103,
-          "median": 117.0,
+          "n": 60,
+          "median": 115.0,
           "p90": 124.0
         }
       },
       "ORD": {
         "dep": {
-          "n": 5,
-          "median": 478.0,
-          "p90": 556.8
+          "n": 3,
+          "median": 454.0,
+          "p90": 569.2
         },
         "arr": {
-          "n": 149,
-          "median": 120.0,
-          "p90": 241.40000000000003
+          "n": 78,
+          "median": 121.5,
+          "p90": 209.6
         }
       },
       "DFW": {
         "dep": {
-          "n": 82,
-          "median": 157.5,
-          "p90": 489.6000000000002
+          "n": 33,
+          "median": 197.0,
+          "p90": 458.0
         },
         "arr": {
-          "n": 119,
+          "n": 61,
           "median": 117.0,
-          "p90": 207.0
+          "p90": 205.0
         }
       },
       "DEN": {
         "dep": {
-          "n": 130,
-          "median": 124.0,
-          "p90": 184.10000000000002
+          "n": 58,
+          "median": 123.0,
+          "p90": 170.8
         },
         "arr": {
-          "n": 175,
+          "n": 95,
           "median": 120.0,
-          "p90": 276.79999999999995
+          "p90": 273.8
         }
       },
       "CLT": {
@@ -1380,24 +1380,24 @@
       },
       "LGA": {
         "dep": {
-          "n": 75,
-          "median": 139.0,
-          "p90": 176.0
+          "n": 42,
+          "median": 135.0,
+          "p90": 172.6
         },
         "arr": {
-          "n": 72,
+          "n": 41,
           "median": 120.0,
           "p90": 123.0
         }
       },
       "MSP": {
         "dep": {
-          "n": 79,
-          "median": 123.0,
-          "p90": 157.2000000000001
+          "n": 44,
+          "median": 123.5,
+          "p90": 188.5
         },
         "arr": {
-          "n": 39,
+          "n": 12,
           "median": 120.0,
           "p90": 123.0
         }
@@ -1405,36 +1405,16 @@
       "DTW": {
         "dep": null,
         "arr": {
-          "n": 5,
-          "median": 125.0,
-          "p90": 197.20000000000002
+          "n": 4,
+          "median": 135.0,
+          "p90": 203.9
         }
       },
       "SEA": {
         "dep": {
-          "n": 78,
+          "n": 52,
           "median": 123.0,
-          "p90": 153.0
-        },
-        "arr": {
-          "n": 67,
-          "median": 119.0,
-          "p90": 123.0
-        }
-      },
-      "MDW": {
-        "dep": null,
-        "arr": {
-          "n": 2,
-          "median": 329.0,
-          "p90": 346.6
-        }
-      },
-      "BNA": {
-        "dep": {
-          "n": 37,
-          "median": 137.0,
-          "p90": 223.6
+          "p90": 152.9
         },
         "arr": {
           "n": 41,
@@ -1442,11 +1422,27 @@
           "p90": 123.0
         }
       },
+      "MDW": {
+        "dep": null,
+        "arr": null
+      },
+      "BNA": {
+        "dep": {
+          "n": 24,
+          "median": 133.0,
+          "p90": 218.79999999999998
+        },
+        "arr": {
+          "n": 21,
+          "median": 120.0,
+          "p90": 123.0
+        }
+      },
       "RDU": {
         "dep": {
-          "n": 3,
-          "median": 362.0,
-          "p90": 366.0
+          "n": 2,
+          "median": 347.5,
+          "p90": 359.1
         },
         "arr": {
           "n": 1,
@@ -3917,6 +3913,1082 @@
       }
     }
   },
+  "detection_ratio_2min_any_schedule_callsign": {
+    "by_hub": {
+      "ATL": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 1,
+              "expected": 9.2,
+              "ratio": 0.10869565217391305
+            },
+            "block1": {
+              "detected": 41,
+              "expected": 95.5,
+              "ratio": 0.4293193717277487
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 1,
+              "expected": 7.8,
+              "ratio": 0.12820512820512822
+            },
+            "block1": {
+              "detected": 32,
+              "expected": 83.0,
+              "ratio": 0.3855421686746988
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 1.5,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 9,
+              "expected": 12.5,
+              "ratio": 0.72
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 4,
+              "expected": 5.5,
+              "ratio": 0.7272727272727273
+            },
+            "block1": {
+              "detected": 55,
+              "expected": 76.0,
+              "ratio": 0.7236842105263158
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 4,
+              "expected": 4.8,
+              "ratio": 0.8333333333333334
+            },
+            "block1": {
+              "detected": 48,
+              "expected": 66.2,
+              "ratio": 0.7250755287009063
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.8,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 7,
+              "expected": 9.8,
+              "ratio": 0.7142857142857142
+            }
+          }
+        }
+      },
+      "ORD": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 11,
+              "expected": 12.0,
+              "ratio": 0.9166666666666666
+            },
+            "block1": {
+              "detected": 76,
+              "expected": 88.0,
+              "ratio": 0.8636363636363636
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 8,
+              "expected": 6.0,
+              "ratio": 1.3333333333333333
+            },
+            "block1": {
+              "detected": 40,
+              "expected": 44.8,
+              "ratio": 0.8928571428571429
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 3,
+              "expected": 6.0,
+              "ratio": 0.5
+            },
+            "block1": {
+              "detected": 36,
+              "expected": 43.2,
+              "ratio": 0.8333333333333333
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 10,
+              "expected": 13.0,
+              "ratio": 0.7692307692307693
+            },
+            "block1": {
+              "detected": 71,
+              "expected": 73.5,
+              "ratio": 0.9659863945578231
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 5,
+              "expected": 8.8,
+              "ratio": 0.5681818181818181
+            },
+            "block1": {
+              "detected": 37,
+              "expected": 34.8,
+              "ratio": 1.0632183908045978
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 5,
+              "expected": 4.2,
+              "ratio": 1.1904761904761905
+            },
+            "block1": {
+              "detected": 34,
+              "expected": 38.8,
+              "ratio": 0.8762886597938145
+            }
+          }
+        }
+      },
+      "DFW": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 9,
+              "expected": 14.0,
+              "ratio": 0.6428571428571429
+            },
+            "block1": {
+              "detected": 73,
+              "expected": 87.5,
+              "ratio": 0.8342857142857143
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 7,
+              "expected": 4.2,
+              "ratio": 1.6666666666666665
+            },
+            "block1": {
+              "detected": 44,
+              "expected": 53.8,
+              "ratio": 0.8178438661710038
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 2,
+              "expected": 9.8,
+              "ratio": 0.2040816326530612
+            },
+            "block1": {
+              "detected": 29,
+              "expected": 33.8,
+              "ratio": 0.8579881656804734
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 7,
+              "expected": 7.2,
+              "ratio": 0.9722222222222222
+            },
+            "block1": {
+              "detected": 65,
+              "expected": 70.2,
+              "ratio": 0.9259259259259259
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 7,
+              "expected": 5.2,
+              "ratio": 1.346153846153846
+            },
+            "block1": {
+              "detected": 48,
+              "expected": 48.8,
+              "ratio": 0.9836065573770493
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 2.0,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 17,
+              "expected": 21.5,
+              "ratio": 0.7906976744186046
+            }
+          }
+        }
+      },
+      "DEN": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 8,
+              "expected": 5.0,
+              "ratio": 1.6
+            },
+            "block1": {
+              "detected": 56,
+              "expected": 63.2,
+              "ratio": 0.8860759493670886
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 8,
+              "expected": 4.2,
+              "ratio": 1.9047619047619047
+            },
+            "block1": {
+              "detected": 47,
+              "expected": 52.0,
+              "ratio": 0.9038461538461539
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.8,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 9,
+              "expected": 11.2,
+              "ratio": 0.8035714285714286
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 3,
+              "expected": 5.2,
+              "ratio": 0.5769230769230769
+            },
+            "block1": {
+              "detected": 93,
+              "expected": 81.5,
+              "ratio": 1.1411042944785277
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 2,
+              "expected": 5.2,
+              "ratio": 0.3846153846153846
+            },
+            "block1": {
+              "detected": 79,
+              "expected": 65.5,
+              "ratio": 1.2061068702290076
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 1,
+              "expected": 0.0,
+              "ratio": null
+            },
+            "block1": {
+              "detected": 14,
+              "expected": 16.0,
+              "ratio": 0.875
+            }
+          }
+        }
+      },
+      "CLT": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 14,
+              "expected": 10.2,
+              "ratio": 1.3725490196078431
+            },
+            "block1": {
+              "detected": 53,
+              "expected": 76.8,
+              "ratio": 0.6901041666666667
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 3,
+              "expected": 4.2,
+              "ratio": 0.7142857142857143
+            },
+            "block1": {
+              "detected": 23,
+              "expected": 38.0,
+              "ratio": 0.6052631578947368
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 11,
+              "expected": 6.0,
+              "ratio": 1.8333333333333333
+            },
+            "block1": {
+              "detected": 30,
+              "expected": 38.8,
+              "ratio": 0.7731958762886598
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 2,
+              "expected": 2.5,
+              "ratio": 0.8
+            },
+            "block1": {
+              "detected": 60,
+              "expected": 59.2,
+              "ratio": 1.0135135135135134
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 2,
+              "expected": 1.2,
+              "ratio": 1.6666666666666667
+            },
+            "block1": {
+              "detected": 26,
+              "expected": 28.2,
+              "ratio": 0.9219858156028369
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 1.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 34,
+              "expected": 31.0,
+              "ratio": 1.096774193548387
+            }
+          }
+        }
+      },
+      "LGA": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 1,
+              "expected": 4.2,
+              "ratio": 0.23809523809523808
+            },
+            "block1": {
+              "detected": 38,
+              "expected": 42.8,
+              "ratio": 0.8878504672897197
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 1,
+              "expected": 1.5,
+              "ratio": 0.6666666666666666
+            },
+            "block1": {
+              "detected": 16,
+              "expected": 16.8,
+              "ratio": 0.9523809523809523
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 2.8,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 22,
+              "expected": 26.0,
+              "ratio": 0.8461538461538461
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 2,
+              "expected": 6.5,
+              "ratio": 0.3076923076923077
+            },
+            "block1": {
+              "detected": 37,
+              "expected": 36.2,
+              "ratio": 1.022099447513812
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 2,
+              "expected": 5.0,
+              "ratio": 0.4
+            },
+            "block1": {
+              "detected": 17,
+              "expected": 14.5,
+              "ratio": 1.1724137931034482
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 1.5,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 20,
+              "expected": 21.8,
+              "ratio": 0.9174311926605504
+            }
+          }
+        }
+      },
+      "MSP": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 2,
+              "expected": 1.2,
+              "ratio": 1.6666666666666667
+            },
+            "block1": {
+              "detected": 40,
+              "expected": 41.8,
+              "ratio": 0.9569377990430623
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 1,
+              "expected": 0.8,
+              "ratio": 1.25
+            },
+            "block1": {
+              "detected": 26,
+              "expected": 26.5,
+              "ratio": 0.9811320754716981
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 1,
+              "expected": 0.5,
+              "ratio": 2.0
+            },
+            "block1": {
+              "detected": 14,
+              "expected": 15.2,
+              "ratio": 0.9210526315789475
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 0,
+              "expected": 2.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 10,
+              "expected": 24.2,
+              "ratio": 0.4132231404958678
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 0,
+              "expected": 1.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 8,
+              "expected": 16.0,
+              "ratio": 0.5
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 1.0,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 2,
+              "expected": 8.2,
+              "ratio": 0.24390243902439027
+            }
+          }
+        }
+      },
+      "DTW": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 1,
+              "expected": 2.8,
+              "ratio": 0.35714285714285715
+            },
+            "block1": {
+              "detected": 21,
+              "expected": 23.5,
+              "ratio": 0.8936170212765957
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.8,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 11,
+              "expected": 9.8,
+              "ratio": 1.1224489795918366
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 1,
+              "expected": 2.0,
+              "ratio": 0.5
+            },
+            "block1": {
+              "detected": 10,
+              "expected": 13.8,
+              "ratio": 0.7246376811594203
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 0,
+              "expected": 3.0,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 24,
+              "expected": 37.5,
+              "ratio": 0.64
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 0,
+              "expected": 2.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 14,
+              "expected": 21.2,
+              "ratio": 0.6603773584905661
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.8,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 10,
+              "expected": 16.2,
+              "ratio": 0.617283950617284
+            }
+          }
+        }
+      },
+      "SEA": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 1,
+              "expected": 4.5,
+              "ratio": 0.2222222222222222
+            },
+            "block1": {
+              "detected": 41,
+              "expected": 50.0,
+              "ratio": 0.82
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 1,
+              "expected": 3.8,
+              "ratio": 0.2631578947368421
+            },
+            "block1": {
+              "detected": 32,
+              "expected": 37.0,
+              "ratio": 0.8648648648648649
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.8,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 9,
+              "expected": 13.0,
+              "ratio": 0.6923076923076923
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 7,
+              "expected": 6.8,
+              "ratio": 1.0294117647058825
+            },
+            "block1": {
+              "detected": 36,
+              "expected": 42.5,
+              "ratio": 0.8470588235294118
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 6,
+              "expected": 5.2,
+              "ratio": 1.1538461538461537
+            },
+            "block1": {
+              "detected": 28,
+              "expected": 36.0,
+              "ratio": 0.7777777777777778
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 1,
+              "expected": 1.5,
+              "ratio": 0.6666666666666666
+            },
+            "block1": {
+              "detected": 8,
+              "expected": 6.5,
+              "ratio": 1.2307692307692308
+            }
+          }
+        }
+      },
+      "MDW": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 5,
+              "expected": 4.2,
+              "ratio": 1.1904761904761905
+            },
+            "block1": {
+              "detected": 24,
+              "expected": 28.5,
+              "ratio": 0.8421052631578947
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 5,
+              "expected": 4.2,
+              "ratio": 1.1904761904761905
+            },
+            "block1": {
+              "detected": 24,
+              "expected": 27.0,
+              "ratio": 0.8888888888888888
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.0,
+              "ratio": null
+            },
+            "block1": {
+              "detected": 0,
+              "expected": 1.5,
+              "ratio": 0.0
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 3,
+              "expected": 0.8,
+              "ratio": 3.75
+            },
+            "block1": {
+              "detected": 5,
+              "expected": 7.5,
+              "ratio": 0.6666666666666666
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 3,
+              "expected": 0.8,
+              "ratio": 3.75
+            },
+            "block1": {
+              "detected": 5,
+              "expected": 7.2,
+              "ratio": 0.6944444444444444
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.0,
+              "ratio": null
+            },
+            "block1": {
+              "detected": 0,
+              "expected": 0.2,
+              "ratio": 0.0
+            }
+          }
+        }
+      },
+      "BNA": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 1,
+              "expected": 5.5,
+              "ratio": 0.18181818181818182
+            },
+            "block1": {
+              "detected": 24,
+              "expected": 30.5,
+              "ratio": 0.7868852459016393
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 1,
+              "expected": 5.2,
+              "ratio": 0.1923076923076923
+            },
+            "block1": {
+              "detected": 21,
+              "expected": 26.5,
+              "ratio": 0.7924528301886793
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 3,
+              "expected": 4.0,
+              "ratio": 0.75
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 6,
+              "expected": 2.0,
+              "ratio": 3.0
+            },
+            "block1": {
+              "detected": 20,
+              "expected": 21.0,
+              "ratio": 0.9523809523809523
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 6,
+              "expected": 1.8,
+              "ratio": 3.333333333333333
+            },
+            "block1": {
+              "detected": 13,
+              "expected": 13.8,
+              "ratio": 0.9420289855072463
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 7,
+              "expected": 7.2,
+              "ratio": 0.9722222222222222
+            }
+          }
+        }
+      },
+      "RDU": {
+        "dep": {
+          "all": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.5,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 8,
+              "expected": 12.2,
+              "ratio": 0.6557377049180328
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 4,
+              "expected": 9.2,
+              "ratio": 0.4347826086956522
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 0.2,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 4,
+              "expected": 3.0,
+              "ratio": 1.3333333333333333
+            }
+          }
+        },
+        "arr": {
+          "all": {
+            "block0": {
+              "detected": 3,
+              "expected": 1.2,
+              "ratio": 2.5
+            },
+            "block1": {
+              "detected": 15,
+              "expected": 14.5,
+              "ratio": 1.0344827586206897
+            }
+          },
+          "mainline": {
+            "block0": {
+              "detected": 3,
+              "expected": 0.2,
+              "ratio": 15.0
+            },
+            "block1": {
+              "detected": 13,
+              "expected": 9.5,
+              "ratio": 1.368421052631579
+            }
+          },
+          "regional": {
+            "block0": {
+              "detected": 0,
+              "expected": 1.0,
+              "ratio": 0.0
+            },
+            "block1": {
+              "detected": 2,
+              "expected": 5.0,
+              "ratio": 0.4
+            }
+          }
+        }
+      }
+    },
+    "total": {
+      "dep": {
+        "all": {
+          "block0": {
+            "detected": 54,
+            "expected": 73.3,
+            "ratio": 0.7366984993178717
+          },
+          "block1": {
+            "detected": 495,
+            "expected": 640.3,
+            "ratio": 0.7730751210370138
+          }
+        },
+        "mainline": {
+          "block0": {
+            "detected": 36,
+            "expected": 42.9,
+            "ratio": 0.8391608391608391
+          },
+          "block1": {
+            "detected": 320,
+            "expected": 424.4,
+            "ratio": 0.7540056550424128
+          }
+        },
+        "regional": {
+          "block0": {
+            "detected": 18,
+            "expected": 30.6,
+            "ratio": 0.5882352941176471
+          },
+          "block1": {
+            "detected": 175,
+            "expected": 216.0,
+            "ratio": 0.8101851851851852
+          }
+        }
+      },
+      "arr": {
+        "all": {
+          "block0": {
+            "detected": 47,
+            "expected": 55.9,
+            "ratio": 0.8407871198568874
+          },
+          "block1": {
+            "detected": 491,
+            "expected": 543.8,
+            "ratio": 0.9029054799558662
+          }
+        },
+        "mainline": {
+          "block0": {
+            "detected": 40,
+            "expected": 41.6,
+            "ratio": 0.9615384615384615
+          },
+          "block1": {
+            "detected": 336,
+            "expected": 361.7,
+            "ratio": 0.9289466408625934
+          }
+        },
+        "regional": {
+          "block0": {
+            "detected": 7,
+            "expected": 14.2,
+            "ratio": 0.49295774647887325
+          },
+          "block1": {
+            "detected": 155,
+            "expected": 182.2,
+            "ratio": 0.8507135016465425
+          }
+        }
+      }
+    }
+  },
+  "daytime_interior_events_with_callsign_in_no_august_schedule": {
+    "events": 1103,
+    "not_in_any_schedule": 117,
+    "by_hub": {
+      "ATL": [
+        27,
+        123
+      ],
+      "ORD": [
+        22,
+        169
+      ],
+      "DFW": [
+        19,
+        157
+      ],
+      "DEN": [
+        5,
+        154
+      ],
+      "CLT": [
+        4,
+        117
+      ],
+      "LGA": [
+        8,
+        83
+      ],
+      "MSP": [
+        6,
+        56
+      ],
+      "DTW": [
+        8,
+        53
+      ],
+      "SEA": [
+        16,
+        93
+      ],
+      "MDW": [
+        0,
+        29
+      ],
+      "BNA": [
+        1,
+        45
+      ],
+      "RDU": [
+        1,
+        24
+      ]
+    }
+  },
+  "departure_cadence_diagnostic_2_to_4min": {
+    "departures_lost": 260,
+    "of_which_ground_then_airborne_pair_within_600s_in_thinned_data": 132
+  },
   "identity_level_lower_bound": {
     "ATL": {
       "dep": {
@@ -4456,166 +5528,318 @@
   },
   "classification": {
     "ATL": {
-      "dep_ratio_daytime": 0.6596858638743456,
-      "arr_ratio_daytime": 0.7894736842105263,
       "dep_bracket_daytime": {
-        "n": 116,
-        "median": 208.0,
-        "p90": 505.0
+        "n": 52,
+        "median": 316.5,
+        "p90": 538.4
       },
       "arr_bracket_daytime": {
-        "n": 103,
-        "median": 117.0,
+        "n": 60,
+        "median": 115.0,
         "p90": 124.0
+      },
+      "primary": {
+        "dep_ratio_daytime": 0.6596858638743456,
+        "arr_ratio_daytime": 0.7894736842105263,
+        "class": "not usable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.4293193717277487,
+        "arr_ratio_daytime": 0.7236842105263158,
+        "class": "not usable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.3769633507853403,
+        "arr_ratio_daytime": 0.5263157894736842,
+        "class": "not usable"
       },
       "class": "not usable"
     },
     "ORD": {
-      "dep_ratio_daytime": 1.0227272727272727,
-      "arr_ratio_daytime": 1.0748299319727892,
       "dep_bracket_daytime": {
-        "n": 5,
-        "median": 478.0,
-        "p90": 556.8
+        "n": 3,
+        "median": 454.0,
+        "p90": 569.2
       },
       "arr_bracket_daytime": {
-        "n": 149,
-        "median": 120.0,
-        "p90": 241.40000000000003
+        "n": 78,
+        "median": 121.5,
+        "p90": 209.6
+      },
+      "primary": {
+        "dep_ratio_daytime": 1.0227272727272727,
+        "arr_ratio_daytime": 1.0748299319727892,
+        "class": "partial"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.8636363636363636,
+        "arr_ratio_daytime": 0.9659863945578231,
+        "class": "partial"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.4090909090909091,
+        "arr_ratio_daytime": 0.4217687074829932,
+        "class": "not usable"
       },
       "class": "partial"
     },
     "DFW": {
-      "dep_ratio_daytime": 0.9828571428571429,
-      "arr_ratio_daytime": 1.0113960113960114,
       "dep_bracket_daytime": {
-        "n": 82,
-        "median": 157.5,
-        "p90": 489.6000000000002
+        "n": 33,
+        "median": 197.0,
+        "p90": 458.0
       },
       "arr_bracket_daytime": {
-        "n": 119,
+        "n": 61,
         "median": 117.0,
-        "p90": 207.0
+        "p90": 205.0
       },
-      "class": "reliable"
+      "primary": {
+        "dep_ratio_daytime": 0.9828571428571429,
+        "arr_ratio_daytime": 1.0113960113960114,
+        "class": "partial"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.8342857142857143,
+        "arr_ratio_daytime": 0.9259259259259259,
+        "class": "partial"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.34285714285714286,
+        "arr_ratio_daytime": 0.4843304843304843,
+        "class": "not usable"
+      },
+      "class": "partial"
     },
     "DEN": {
-      "dep_ratio_daytime": 0.9335443037974683,
-      "arr_ratio_daytime": 1.165644171779141,
       "dep_bracket_daytime": {
-        "n": 130,
-        "median": 124.0,
-        "p90": 184.10000000000002
+        "n": 58,
+        "median": 123.0,
+        "p90": 170.8
       },
       "arr_bracket_daytime": {
-        "n": 175,
+        "n": 95,
         "median": 120.0,
-        "p90": 276.79999999999995
+        "p90": 273.8
+      },
+      "primary": {
+        "dep_ratio_daytime": 0.9335443037974683,
+        "arr_ratio_daytime": 1.165644171779141,
+        "class": "reliable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.8860759493670886,
+        "arr_ratio_daytime": 1.1411042944785277,
+        "class": "reliable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.4430379746835443,
+        "arr_ratio_daytime": 0.6503067484662577,
+        "class": "not usable"
       },
       "class": "reliable"
     },
     "CLT": {
-      "dep_ratio_daytime": 0.7291666666666667,
-      "arr_ratio_daytime": 1.0304054054054053,
       "dep_bracket_daytime": null,
       "arr_bracket_daytime": null,
+      "primary": {
+        "dep_ratio_daytime": 0.7291666666666667,
+        "arr_ratio_daytime": 1.0304054054054053,
+        "class": "partial"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.6901041666666667,
+        "arr_ratio_daytime": 1.0135135135135134,
+        "class": "not usable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.3125,
+        "arr_ratio_daytime": 0.5067567567567567,
+        "class": "not usable"
+      },
       "class": "partial"
     },
     "LGA": {
-      "dep_ratio_daytime": 0.9813084112149534,
-      "arr_ratio_daytime": 1.1325966850828728,
       "dep_bracket_daytime": {
-        "n": 75,
-        "median": 139.0,
-        "p90": 176.0
+        "n": 42,
+        "median": 135.0,
+        "p90": 172.6
       },
       "arr_bracket_daytime": {
-        "n": 72,
+        "n": 41,
         "median": 120.0,
         "p90": 123.0
+      },
+      "primary": {
+        "dep_ratio_daytime": 0.9813084112149534,
+        "arr_ratio_daytime": 1.1325966850828728,
+        "class": "reliable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.8878504672897197,
+        "arr_ratio_daytime": 1.022099447513812,
+        "class": "reliable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.4906542056074767,
+        "arr_ratio_daytime": 0.5248618784530387,
+        "class": "not usable"
       },
       "class": "reliable"
     },
     "MSP": {
-      "dep_ratio_daytime": 1.0526315789473686,
-      "arr_ratio_daytime": 0.49586776859504134,
       "dep_bracket_daytime": {
-        "n": 79,
-        "median": 123.0,
-        "p90": 157.2000000000001
+        "n": 44,
+        "median": 123.5,
+        "p90": 188.5
       },
       "arr_bracket_daytime": {
-        "n": 39,
+        "n": 12,
         "median": 120.0,
         "p90": 123.0
+      },
+      "primary": {
+        "dep_ratio_daytime": 1.0526315789473686,
+        "arr_ratio_daytime": 0.49586776859504134,
+        "class": "not usable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.9569377990430623,
+        "arr_ratio_daytime": 0.4132231404958678,
+        "class": "not usable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.6698564593301436,
+        "arr_ratio_daytime": 0.2066115702479339,
+        "class": "not usable"
       },
       "class": "not usable"
     },
     "DTW": {
-      "dep_ratio_daytime": 1.1063829787234043,
-      "arr_ratio_daytime": 0.72,
       "dep_bracket_daytime": null,
       "arr_bracket_daytime": {
-        "n": 5,
-        "median": 125.0,
-        "p90": 197.20000000000002
+        "n": 4,
+        "median": 135.0,
+        "p90": 203.9
+      },
+      "primary": {
+        "dep_ratio_daytime": 1.1063829787234043,
+        "arr_ratio_daytime": 0.72,
+        "class": "partial"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.8936170212765957,
+        "arr_ratio_daytime": 0.64,
+        "class": "not usable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.425531914893617,
+        "arr_ratio_daytime": 0.4266666666666667,
+        "class": "not usable"
       },
       "class": "partial"
     },
     "SEA": {
-      "dep_ratio_daytime": 1.04,
-      "arr_ratio_daytime": 0.9647058823529412,
       "dep_bracket_daytime": {
-        "n": 78,
+        "n": 52,
         "median": 123.0,
-        "p90": 153.0
-      },
-      "arr_bracket_daytime": {
-        "n": 67,
-        "median": 119.0,
-        "p90": 123.0
-      },
-      "class": "reliable"
-    },
-    "MDW": {
-      "dep_ratio_daytime": 0.8421052631578947,
-      "arr_ratio_daytime": 0.6666666666666666,
-      "dep_bracket_daytime": null,
-      "arr_bracket_daytime": {
-        "n": 2,
-        "median": 329.0,
-        "p90": 346.6
-      },
-      "class": "not usable"
-    },
-    "BNA": {
-      "dep_ratio_daytime": 0.7868852459016393,
-      "arr_ratio_daytime": 1.0,
-      "dep_bracket_daytime": {
-        "n": 37,
-        "median": 137.0,
-        "p90": 223.6
+        "p90": 152.9
       },
       "arr_bracket_daytime": {
         "n": 41,
         "median": 119.0,
         "p90": 123.0
       },
+      "primary": {
+        "dep_ratio_daytime": 1.04,
+        "arr_ratio_daytime": 0.9647058823529412,
+        "class": "reliable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.82,
+        "arr_ratio_daytime": 0.8470588235294118,
+        "class": "partial"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.62,
+        "arr_ratio_daytime": 0.6823529411764706,
+        "class": "not usable"
+      },
+      "class": "reliable"
+    },
+    "MDW": {
+      "dep_bracket_daytime": null,
+      "arr_bracket_daytime": null,
+      "primary": {
+        "dep_ratio_daytime": 0.8421052631578947,
+        "arr_ratio_daytime": 0.6666666666666666,
+        "class": "not usable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.8421052631578947,
+        "arr_ratio_daytime": 0.6666666666666666,
+        "class": "not usable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.21052631578947367,
+        "arr_ratio_daytime": 0.0,
+        "class": "not usable"
+      },
+      "class": "not usable"
+    },
+    "BNA": {
+      "dep_bracket_daytime": {
+        "n": 24,
+        "median": 133.0,
+        "p90": 218.79999999999998
+      },
+      "arr_bracket_daytime": {
+        "n": 21,
+        "median": 120.0,
+        "p90": 123.0
+      },
+      "primary": {
+        "dep_ratio_daytime": 0.7868852459016393,
+        "arr_ratio_daytime": 1.0,
+        "class": "partial"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.7868852459016393,
+        "arr_ratio_daytime": 0.9523809523809523,
+        "class": "partial"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.26229508196721313,
+        "arr_ratio_daytime": 0.3333333333333333,
+        "class": "not usable"
+      },
       "class": "partial"
     },
     "RDU": {
-      "dep_ratio_daytime": 0.6557377049180328,
-      "arr_ratio_daytime": 1.103448275862069,
       "dep_bracket_daytime": {
-        "n": 3,
-        "median": 362.0,
-        "p90": 366.0
+        "n": 2,
+        "median": 347.5,
+        "p90": 359.1
       },
       "arr_bracket_daytime": {
         "n": 1,
         "median": 128.0,
         "p90": 128.0
+      },
+      "primary": {
+        "dep_ratio_daytime": 0.6557377049180328,
+        "arr_ratio_daytime": 1.103448275862069,
+        "class": "not usable"
+      },
+      "middle_any_schedule": {
+        "dep_ratio_daytime": 0.6557377049180328,
+        "arr_ratio_daytime": 1.0344827586206897,
+        "class": "not usable"
+      },
+      "strict_hub_schedule": {
+        "dep_ratio_daytime": 0.3278688524590164,
+        "arr_ratio_daytime": 0.5517241379310345,
+        "class": "not usable"
       },
       "class": "not usable"
     }

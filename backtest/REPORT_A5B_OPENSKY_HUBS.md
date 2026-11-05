@@ -42,24 +42,47 @@ Raw output: `backtest/results/a5b_opensky_hubs.json` (`python backtest/opensky_h
 
 All hubs together: departures 574 / 640.3 = **0.90** (mainline 0.90, regional 0.89); arrivals 529 / 543.8 = **0.97** (mainline 0.99, regional 0.93). Evening (noisy): departures 0.78, arrivals 0.86.
 
-| Hub | Dep all | Dep mainline | Dep regional | Arr all | Arr mainline | Arr regional | Class |
+| Hub | Dep all | Dep mainline | Dep regional | Arr all | Arr mainline | Arr regional | Class (primary) |
 |---|---|---|---|---|---|---|---|
 | ATL | 0.66 | 0.65 | 0.72 | 0.79 | 0.80 | 0.71 | not usable |
 | ORD | 1.02 | 1.14 | 0.90 | 1.07 | 1.21 | 0.95 | partial |
-| DFW | 0.98 | 1.00 | 0.95 | 1.01 | 1.09 | 0.84 | **reliable** |
+| DFW | 0.98 | 1.00 | 0.95 | 1.01 | 1.09 | 0.84 | partial (borderline; departure bracket median 197 s) |
 | DEN | 0.93 | 0.96 | 0.80 | 1.17 | 1.24 | 0.88 | **reliable** |
 | CLT | 0.73 | 0.66 | 0.80 | 1.03 | 0.96 | 1.10 | partial |
 | LGA | 0.98 | 1.01 | 0.96 | 1.13 | 1.24 | 1.06 | **reliable** |
 | MSP | 1.05 | 1.06 | 1.05 | 0.50 | 0.50 | 0.49 | not usable |
 | DTW | 1.11 | 1.22 | 1.01 | 0.72 | 0.71 | 0.74 | partial |
-| SEA | 1.04 | 1.14 | 0.77 | 0.96 | 0.86 | 1.54 | **reliable** |
+| SEA | 1.04 | 1.14 | 0.77 | 0.96 | 0.86 | 1.54 | **reliable** (borderline under the middle numerator) |
 | MDW | 0.84 | 0.89 | 0.00 | 0.67 | 0.69 | 0.00 | not usable |
 | BNA | 0.79 | 0.79 | 0.75 | 1.00 | 0.94 | 1.11 | partial |
 | RDU | 0.66 | 0.43 | 1.33 | 1.10 | 1.37 | 0.60 | not usable |
 
 Per-hub, per-hour, per-carrier-group counts (detected and expected) are in the JSON under `detection_ratio_by_hour` (the daytime window gives one full hour and a 27-minute remainder). Hourly values are noisy (for example MSP arrivals 11/20, then 1/4). Expected counts per hub per hour are roughly 10 to 65, so a single ratio carries large sampling noise on top of the denominator's own +/-10-15%. MDW, BNA, RDU, DTW and the regional columns have expected counts under about 15 to 30 and are indicative only. Ratios above 1 are possible because detections include any BTS-carrier callsign (including international and non-recurring flights) while the denominator is August domestic flights only.
 
-**Numerator definition caveat (read this).** The first version of `analyze` counted only events whose callsign appeared in the BTS schedule for that hub and direction, which gave a much lower total (departures 0.41, arrivals 0.50). That version mixed the secondary (flight-identity) metric into the primary one, contrary to the protocol, which defines the primary metric as an aggregate "robust to which flights run" and defines airline callsigns as a BTS carrier's ICAO code plus 1 to 4 digits. I changed the primary numerator to the protocol definition. This was decided after seeing the first run's numbers, so it is disclosed here. Both versions are saved (`detection_ratio_2min_schedule_callsign_only` is the stricter one). The strict version is a floor, not a detection rate: flight numbers are re-used and re-numbered between August and November, so many real departures fail the callsign test. Under the strict version no hub reaches 0.7 in both directions, so every hub would be "not usable". The truth lies between the two; the secondary metric below shows why the strict figure is pessimistic.
+**Numerator definition caveat (read this).** The first version of `analyze` counted only events whose callsign appeared in the BTS schedule for that hub and direction, which gave a much lower total (departures 0.41, arrivals 0.50). That version mixed the secondary (flight-identity) metric into the primary one, contrary to the protocol, which defines the primary metric as an aggregate "robust to which flights run" and defines airline callsigns as a BTS carrier's ICAO code plus 1 to 4 digits. I changed the primary numerator to the protocol definition. This was decided after seeing the first run's numbers, so it is disclosed here. All three numerators are reported side by side below.
+
+- **Primary (protocol):** any airline-pattern callsign.
+- **Middle (sensitivity):** drops events whose callsign appears in no August BTS schedule at all (any day, any airport). This removes 117 of 1,103 daytime interior events (ATL 27/123, ORD 22/169, DFW 19/157, SEA 16/93, DEN 5/154), mostly international, charter and ferry flights that the domestic-only denominator cannot contain. It also drops real domestic flights renumbered since August, so it is a lower-leaning estimate, not the truth. All hubs together: departures 0.77, arrivals 0.90.
+- **Strict (floor):** only callsigns BTS lists for that hub and direction. All hubs together: departures 0.41, arrivals 0.50. This is a floor, not a detection rate: flight numbers are re-used and renumbered between August and November, so many real departures fail the callsign test. Every hub would be "not usable".
+
+The truth lies between primary and middle; the secondary metric below shows why the strict figure is pessimistic.
+
+| Hub | Primary dep/arr (class) | Middle dep/arr (class) | Strict dep/arr (class) |
+|---|---|---|---|
+| ATL | 0.66/0.79 (not usable) | 0.43/0.72 (not usable) | 0.38/0.53 (not usable) |
+| ORD | 1.02/1.07 (partial) | 0.86/0.97 (partial) | 0.41/0.42 (not usable) |
+| DFW | 0.98/1.01 (partial) | 0.83/0.93 (partial) | 0.34/0.48 (not usable) |
+| DEN | 0.93/1.17 (reliable) | 0.89/1.14 (reliable) | 0.44/0.65 (not usable) |
+| CLT | 0.73/1.03 (partial) | 0.69/1.01 (not usable) | 0.31/0.51 (not usable) |
+| LGA | 0.98/1.13 (reliable) | 0.89/1.02 (reliable) | 0.49/0.52 (not usable) |
+| MSP | 1.05/0.50 (not usable) | 0.96/0.41 (not usable) | 0.67/0.21 (not usable) |
+| DTW | 1.11/0.72 (partial) | 0.89/0.64 (not usable) | 0.43/0.43 (not usable) |
+| SEA | 1.04/0.96 (reliable) | 0.82/0.85 (partial) | 0.62/0.68 (not usable) |
+| MDW | 0.84/0.67 (not usable) | 0.84/0.67 (not usable) | 0.21/0.00 (not usable) |
+| BNA | 0.79/1.00 (partial) | 0.79/0.95 (partial) | 0.26/0.33 (not usable) |
+| RDU | 0.66/1.10 (not usable) | 0.66/1.03 (not usable) | 0.33/0.55 (not usable) |
+
+Classes use the same bracket medians (daytime interior window) for all three. The primary classification stands as pre-registered, but it is not robust: **only DEN and LGA are reliable under both the primary and middle numerators** and are the robust "reliable" hubs. SEA is borderline (0.82 / 0.85 under the middle numerator), and so is DFW (see the bracket note under Timing).
 
 ### Secondary metric: flight identity by callsign (lower bound)
 
@@ -67,9 +90,9 @@ Share of recurring flights (present in at least 75% of same-weekday Augusts) mat
 
 ### Timing
 
-- Bracket width (airborne time minus last ground time; bracketed events only), daytime: departures median 132 s, p90 329 s (605 events); arrivals median 119 s, p90 198 s (773 events). Arrival brackets sit at the 120 s polling floor everywhere.
-- Only 61% of departures are bracketed (80% of arrivals); the rest were first seen already climbing. Daytime departure bracket medians by hub: ATL 208 s, DFW 158 s, DEN 124 s, LGA 139 s, MSP 123 s, SEA 123 s, BNA 137 s. ORD has only 5 bracketed departures (median 478 s) despite 2,413 ground sightings, and CLT, DTW and MDW have none because those boxes returned very few surface (on-ground) vectors (CLT 8 and DTW 16 ground rows over the whole run, against thousands at ATL, DEN, DFW). That is a coverage property of the OpenSky receiver network, not a code fault.
-- Plausibility check (matched departures, daytime, n = 127): detected takeoff minus scheduled has p10 / p50 / p90 of -4.7 / 21 / 52 minutes; August wheels-off minus scheduled for the same flights is 8 / 14.5 / 28.7 minutes. The detected distribution is shifted later and wider, so detected takeoff times are plausible but only a coarse signal. The matched sample is small and biased toward flights whose callsign persisted, so this is a plausibility check only.
+- Bracket width (airborne time minus last ground time; bracketed events only), over the same trimmed daytime interior window as the ratios: departures median 131 s, p90 359 s (310 events); arrivals median 119.5 s, p90 190 s (414 events). Arrival brackets sit at the 120 s polling floor everywhere.
+- Only 61% of departures are bracketed (80% of arrivals); the rest were first seen already climbing. Daytime interior departure bracket medians by hub: ATL 316 s, DFW 197 s, DEN 123 s, LGA 135 s, MSP 124 s, SEA 123 s, BNA 133 s. Classification brackets were first computed over the whole daytime block (the reviewer pointed out the mismatch); recomputing over the interior window changed **one label: DFW moves from reliable to partial** because its departure bracket median is 197 s (n = 33), above the 180 s limit (it was 158 s over the whole block). No other label changed. ORD has only 3 bracketed departures (median 454 s) despite 2,413 ground sightings, and CLT, DTW and MDW have none because those boxes returned very few surface (on-ground) vectors (CLT 8 and DTW 16 ground rows over the whole run, against thousands at ATL, DEN, DFW). That is a coverage property of the OpenSky receiver network, not a code fault.
+- Plausibility check (matched departures, daytime, n = 127): detected takeoff minus scheduled has p10 / p50 / p90 of -4.7 / 21 / 52 minutes; August wheels-off minus scheduled for the same flights is 8 / 14.5 / 28.7 minutes. The detected distribution is shifted later and much wider than August's, and 10% of matched "takeoffs" come 4.7 minutes or more before the scheduled departure, which a real takeoff rarely does. That points to callsign mismatches (a callsign reused by a different flight within 60 minutes) as well as detection error. This check therefore does not validate the inferred takeoff times; they should be treated as unvalidated. The matched sample is also small and biased toward flights whose callsign persisted.
 
 ### Interval sensitivity (same data, daytime window, all hubs)
 
@@ -79,7 +102,7 @@ Share of recurring flights (present in at least 75% of same-weekday Augusts) mat
 | 4 min (every 2nd round) | 0.49 | 0.98 |
 | 6 min (every 3rd round) | 0.32 | 0.89 |
 
-Arrivals survive coarser polling because the aircraft sits on the ground, and is seen, for a long time. Departures do not: an aircraft is under 1,200 m and within 15 km for only a few minutes, so polling slower than every 2 minutes loses most of them. Departure detection needs 2-minute polling at the slowest; whether 1-minute polling would improve on 0.90 was not tested.
+Arrivals survive coarser polling because the aircraft sits on the ground, and is seen, for a long time. With the pre-registered detector, departures drop to 0.49 at 4 minutes. This is partly a property of the detector, not only of OpenSky: the departure gate needs an airborne sighting within 15 km and under 1,200 m, and at 4-minute spacing the first airborne sighting is often already beyond that gate; because the aircraft has a previous sighting it does not count as first-seen-climbing either. The ground-then-airborne pair is still present in the data but is not counted. Of the 260 departures found at 2 minutes and lost at 4 minutes, 132 still show a ground-then-airborne pair within 600 s in the thinned data (`departure_cadence_diagnostic_2_to_4min`). An exploratory estimate (not pre-registered, not computed here) is that a looser departure gate would recover to about 0.70 at 4 minutes. Whether 1-minute polling would improve on 0.90 was not tested.
 
 ### Inbound-aircraft linkage
 
@@ -104,19 +127,19 @@ Over 264 box/CONUS comparisons, a hub box and the same area cut from the CONUS r
 
 Rule as applied: **reliable** = departure and arrival ratio both at least 0.85 and median bracket at most 180 s in both directions; **not usable** = either ratio below 0.7; otherwise **partial**. Two interpretation choices, made before classifying: (1) "fewer than 0.7" is read as either direction, since "reliable" needs both; (2) a bracket median that cannot be computed, or that comes from fewer than 10 bracketed events, does not pass. If "not usable" instead required both ratios under 0.7, ATL, MSP, MDW and RDU would be "partial".
 
-- **Reliable (4):** DFW, DEN, LGA, SEA.
-- **Partial (4):** ORD (counts fine at 1.02 / 1.07, but almost no bracketed departures), CLT (departures 0.73; no surface vectors, so no brackets), DTW (arrivals 0.72; no surface vectors), BNA (departures 0.79).
+- **Reliable (3):** DEN, LGA, SEA. DEN and LGA are the robust ones (reliable under both the primary and middle numerators). SEA is borderline (0.82 / 0.85 under the middle numerator).
+- **Partial (5):** DFW (ratios 0.98 / 1.01 but departure bracket median 197 s over the interior window; borderline, partial under the middle numerator too), ORD (counts fine at 1.02 / 1.07, but almost no bracketed departures), CLT (departures 0.73; no surface vectors, so no brackets), DTW (arrivals 0.72; no surface vectors), BNA (departures 0.79).
 - **Not usable (4):** ATL (departures 0.66, median bracket 208 s), MSP (arrivals 0.50), MDW (arrivals 0.67, only 7 expected arrivals, very noisy), RDU (departures 0.66 from only 12 expected, very noisy).
 
 ### Verdict
 
-Free OpenSky `/states/all` can feed the T-3h and T-1h features at some hubs, not all. In aggregate it saw 90% of departures and 97% of arrivals at 2-minute polling in the daytime window, but only 4 of 12 hubs pass the pre-registered per-hub rule (DFW, DEN, LGA, SEA); 4 are partial and 4 fail. The failures come from missing ground-vector coverage (CLT, DTW, ORD departures), weak counts at ATL and MSP, and very small expected counts at MDW and RDU.
+Free OpenSky `/states/all` can feed the T-3h and T-1h features at some hubs, not all. In aggregate it saw 90% of departures and 97% of arrivals at 2-minute polling in the daytime window, but only 3 of 12 hubs pass the pre-registered per-hub rule (DEN, LGA, SEA); 5 are partial and 4 fail. Only DEN and LGA are robustly reliable (they also pass under the middle numerator); SEA and DFW are borderline. The failures come from missing ground-vector coverage (CLT, DTW, ORD departures), weak counts at ATL and MSP, and very small expected counts at MDW and RDU. The 0.90 / 0.97 aggregate figures are the protocol numerator; under the middle numerator they are 0.77 / 0.90, and the strict floor is 0.41 / 0.50.
 
-- **Arrivals** (the "has the inbound landed" signal) are the strong part: about 0.97 overall, 0.98 at 4-minute polling, and 0.89 at 6 minutes.
-- **Departures** (the "are departures running late" signal) need 2-minute polling; at 4 minutes the detection ratio halves.
-- **Cadence and cost:** 2-minute polling over a 16-hour day costs 1,920 credits as one CONUS call per round covering all hubs (3,840 for 8 hubs as boxes), so CONUS is the sensible design. Arrivals-only at 4-minute CONUS polling would cost about 960 credits for 16 hours.
+- **Arrivals** (the "has the inbound landed" signal) are the strong part: about 0.97 overall (0.90 under the middle numerator), 0.98 at 4-minute polling, and 0.89 at 6 minutes.
+- **Departures** (the "are departures running late" signal): with the pre-registered detector, departures drop to 0.49 at 4 minutes. Part of that is the detector's strict airborne gate rather than missing data (see Interval sensitivity), so 2-minute polling is the validated cadence, not a proven hard requirement.
+- **Cadence and cost:** one CONUS call per round covering all hubs costs 1,920 credits per 16-hour day at 2-minute polling and 960 credits at 4-minute polling (3,840 for 8 hubs as boxes at 2 minutes). CONUS is the sensible design. 4-minute polling is adequate for arrivals; whether it is adequate for departures depends on a looser detector that was not tested.
 - **What it cannot do:** link a flight to its inbound aircraft. August tail assignments are unstable (modal tail share 25-33%) and almost never match the observed aircraft, and callsign matching against an August schedule is poor. Tail-level linkage needs a live schedule or tail-assignment source.
-- **Limits of this evidence:** one weekday, one 86-minute daytime window, roughly 10 to 95 expected events per hub, a denominator accurate to only +/-10-15%, and an evening window too short to use. Labels for the small hubs (MDW, BNA, RDU, DTW) are low-confidence. Repeating across several days and times of day would be needed before relying on any single hub's label.
+- **Limits of this evidence:** about 12% of daytime interior detections (117 of 1,103) have callsigns that appear in no August schedule (international, charter, ferry), which the domestic-only denominator cannot contain, so the primary ratios are inflated and labels near the thresholds are fragile. One weekday, one 86-minute daytime window, roughly 10 to 95 expected events per hub, a denominator accurate to only +/-10-15%, and an evening window too short to use. Labels for the small hubs (MDW, BNA, RDU, DTW) are low-confidence. Repeating across several days and times of day would be needed before relying on any single hub's label.
 
 ### Deviations from the protocol and implementation notes
 
@@ -126,4 +149,8 @@ Free OpenSky `/states/all` can feed the T-3h and T-1h features at some hubs, not
 4. The secondary metric matches against scheduled time as the protocol says (the first version matched against the median August actual time). Scheduled arrival is approximated as August wheels-on minus arrival delay, which ignores taxi-in (about 5-10 minutes) and is harmless inside the 60-minute window.
 5. Bracket widths use bracketed events only; unbracketed events (first seen climbing, or last seen descending) have no bracket, are counted in the detection ratios, and are excluded from timing. Daytime-only medians drive the decision rule.
 6. The optional `/flights/departure` comparison was not run.
-7. Analysis bug fixed: `rec.tail` resolved to the DataFrame method instead of the tail-number column, which crashed `analyze`.
+7. "Preceded by" in the event definitions is implemented as a previous sighting of the same aircraft at most 600 s earlier (`MAX_GAP`). The protocol gives no limit.
+8. At most one event per aircraft and event type per 30 minutes is kept (dedupe). The protocol does not state this.
+9. Hub boxes are 1.0 x 1.2 degrees (the protocol said about 1.0 x 1.1). It is still 1 credit per call.
+10. Review follow-ups: the middle numerator was added as a third sensitivity, and classification brackets were moved from the whole daytime block to the trimmed interior window (this moved DFW from reliable to partial; see Timing).
+11. Analysis bug fixed: `rec.tail` resolved to the DataFrame method instead of the tail-number column, which crashed `analyze`.

@@ -249,9 +249,12 @@ def expected_and_recurring(ref):
     return full, fl
 
 
-def ratio_for(events, fl, blocks_iv, hubs, step_label, restrict_to_schedule=False):
-    """Aggregate detected/expected per hub, for the given (already thinned) events. blocks_iv = interior windows."""
-    known = {}
+def ratio_for(events, fl, blocks_iv, hubs, step_label, numerator="all", sched_any=None):
+    """Aggregate detected/expected per hub, for the given (already thinned) events. blocks_iv = interior windows.
+    numerator: "all" = every airline-pattern callsign (protocol-literal, primary);
+               "any_schedule" = only callsigns in sched_any (every August BTS flight, any day and airport) (drops international/charter/ferry);
+               "hub_schedule" = only callsigns BTS lists for this hub and direction (strictest; a floor)."""
+    sched_all = sched_any if sched_any is not None else set(fl.cs_op) | set(fl.cs_mk)
     out = {}
     for h in hubs:
         for kind, col_h, col_t in (("dep", "Origin", "woff"), ("arr", "Dest", "won")):
@@ -259,13 +262,14 @@ def ratio_for(events, fl, blocks_iv, hubs, step_label, restrict_to_schedule=Fals
             for g, name in ((None, "all"), ("mainline", "mainline"), ("regional", "regional")):
                 ss = sub if g is None else sub[sub.op.isin(oco.MAINLINE) == (g == "mainline")]
                 ee = events[(events.hub == h) & (events.kind == kind)]
-                if restrict_to_schedule:   # stricter sensitivity: only callsigns that BTS lists for this hub/direction
+                if numerator == "any_schedule":
+                    ee = ee[ee.cs.isin(sched_all)]
+                elif numerator == "hub_schedule":
                     ee = ee[ee.cs.isin(set(ss.cs_op) | set(ss.cs_mk))]
                 if g is not None:
                     ee = ee[ee.cs.str[:3].map(oco.ICAO_TO_IATA).isin(oco.MAINLINE) == (g == "mainline")]
                 for bi, (w0, w1) in enumerate(blocks_iv):
                     exp = ss[(ss[col_t] >= w0) & (ss[col_t] <= w1)]
-                    n_exp = len(exp) / max(1, exp.groupby("L").n_src.first().mean() if len(exp) else 1) if len(exp) else 0.0
                     # expected count = flights per Aug day: rows / n_src per L (each L has its own n_src)
                     n_exp = sum(len(gg) / gg.n_src.iloc[0] for _, gg in exp.groupby("L")) if len(exp) else 0.0
                     n_det = int(((ee.t >= w0) & (ee.t <= w1)).sum())
@@ -325,6 +329,7 @@ def analyze():
     a = a[a["type"].isin(["large_airport", "medium_airport"]) & (a.scheduled_service == "yes") & a.iata_code.notna()]
     airports = [(float(r.latitude_deg), float(r.longitude_deg), float(r.elevation_ft) * .3048 if pd.notna(r.elevation_ft) else 0.0) for r in a.itertuples()]
     full, fl = expected_and_recurring(ref)
+    known_any = set(full.cs_op) | set(full.cs_mk)   # callsigns of every August BTS flight, any day and airport
     known_all = set(fl.cs_op) | set(fl.cs_mk)   # used by the optional /flights comparison
 
     blocks = blocks_from(d.t)
@@ -354,7 +359,7 @@ def analyze():
     res["events_total"] = {k: int(v) for k, v in ev.kind.value_counts().items()}
     # ---- timing (bracket widths), overall and per hub, for all windows and for the daytime block only
     br = ev[ev.bracketed]
-    day0, day1 = blocks[-1]
+    day0, day1 = interior[-1]   # same trimmed interior daytime window as the ratios
 
     def bw(x):
         return {"n": int(len(x)), "median": float(x.bracket_s.median()), "p90": float(x.bracket_s.quantile(.9))} if len(x) else None
@@ -362,8 +367,8 @@ def analyze():
     res["timing"] = {
         "share_bracketed": {k: float(ev[ev.kind == k].bracketed.mean()) for k in ("dep", "arr") if (ev.kind == k).any()},
         "bracket_width_s": {k: bw(br[br.kind == k]) for k in ("dep", "arr")},
-        "bracket_width_s_daytime_block": {k: bw(br[(br.kind == k) & br.t.between(day0, day1)]) for k in ("dep", "arr")},
-        "bracket_width_s_by_hub_daytime_block": {h: {k: bw(br[(br.hub == h) & (br.kind == k) & br.t.between(day0, day1)]) for k in ("dep", "arr")} for h in HUBS},
+        "bracket_width_s_daytime_interior": {k: bw(br[(br.kind == k) & br.t.between(day0, day1)]) for k in ("dep", "arr")},
+        "bracket_width_s_by_hub_daytime_interior": {h: {k: bw(br[(br.hub == h) & (br.kind == k) & br.t.between(day0, day1)]) for k in ("dep", "arr")} for h in HUBS},
         "bracket_width_s_by_hub_all": {h: {k: bw(br[(br.hub == h) & (br.kind == k)]) for k in ("dep", "arr")} for h in HUBS}}
     # ---- primary metric per hub and per hour (interior windows cut into hourly bins)
     hourly, hlabels = [], []
@@ -376,7 +381,25 @@ def analyze():
     hr = summarize_ratio(ratio_for(ev, fl, hourly, HUBS, "hourly"))["by_hub"]
     res["detection_ratio_by_hour"] = {"bins_utc": hlabels, "by_hub": hr}
     # ---- sensitivity: numerator restricted to callsigns BTS lists for that hub and direction (a lower bound: identity-level)
-    res["detection_ratio_2min_schedule_callsign_only"] = summarize_ratio(ratio_for(ev, fl, interior, HUBS, "step1", restrict_to_schedule=True))
+    res["detection_ratio_2min_schedule_callsign_only"] = summarize_ratio(ratio_for(ev, fl, interior, HUBS, "step1", numerator="hub_schedule"))
+    res["detection_ratio_2min_any_schedule_callsign"] = summarize_ratio(ratio_for(ev, fl, interior, HUBS, "step1", numerator="any_schedule", sched_any=known_any))
+    dwin = ev[ev.t.between(*interior[-1])]
+    res["daytime_interior_events_with_callsign_in_no_august_schedule"] = {
+        "events": int(len(dwin)), "not_in_any_schedule": int((~dwin.cs.isin(known_any)).sum()),
+        "by_hub": {h: [int((~dwin[dwin.hub == h].cs.isin(known_any)).sum()), int((dwin.hub == h).sum())] for h in HUBS}}
+    # ---- diagnostic: why departures fall at 4-minute spacing (departures found at 2 min but not at 4 min)
+    e2 = events_by_step[2]
+    d2 = d[d.rk % 2 == 0].sort_values(["icao24", "te"])
+    n_lost = n_pair = 0
+    for r in ev[(ev.kind == "dep") & ev.t.between(*interior[-1])].itertuples():
+        if len(e2[(e2.hub == r.hub) & (e2.kind == "dep") & (e2.icao24 == r.icao24) & ((e2.t - r.t).abs() < 1800)]):
+            continue
+        n_lost += 1
+        g = d2[(d2.hub == r.hub) & (d2.icao24 == r.icao24) & ((d2.te - r.t).abs() < 1800)]
+        gv, tv = g.ground.values, g.te.values
+        if any(gv[i] and not gv[i + 1] and tv[i + 1] - tv[i] <= MAX_GAP for i in range(len(g) - 1)):
+            n_pair += 1
+    res["departure_cadence_diagnostic_2_to_4min"] = {"departures_lost": n_lost, "of_which_ground_then_airborne_pair_within_600s_in_thinned_data": n_pair}
     # ---- identity-level (recurring flights, secondary metric), tails, takeoff-timing plausibility
     fl["sarr"] = fl.won - fl.ArrDelay.fillna(0) * 60      # approx. scheduled arrival (wheels-on minus arrival delay; ignores taxi-in)
     key = ["op", "cs_op", "cs_mk", "Origin", "Dest", "dep_min", "L"]
@@ -483,11 +506,14 @@ def analyze():
     last = f"block{len(interior) - 1}"
     cls = {}
     for h in HUBS:
-        bh = res["detection_ratio_2min"]["by_hub"][h]
-        bt = res["timing"]["bracket_width_s_by_hub_daytime_block"][h]
-        cls[h] = {"dep_ratio_daytime": bh["dep"]["all"][last]["ratio"], "arr_ratio_daytime": bh["arr"]["all"][last]["ratio"],
-                  "dep_bracket_daytime": bt["dep"], "arr_bracket_daytime": bt["arr"]}
-        cls[h]["class"] = classify_hub(cls[h]["dep_ratio_daytime"], cls[h]["arr_ratio_daytime"], bt["dep"], bt["arr"])
+        bt = res["timing"]["bracket_width_s_by_hub_daytime_interior"][h]
+        cls[h] = {"dep_bracket_daytime": bt["dep"], "arr_bracket_daytime": bt["arr"]}
+        for label, key in (("primary", "detection_ratio_2min"), ("middle_any_schedule", "detection_ratio_2min_any_schedule_callsign"),
+                           ("strict_hub_schedule", "detection_ratio_2min_schedule_callsign_only")):
+            bh = res[key]["by_hub"][h]
+            dr, ar = bh["dep"]["all"][last]["ratio"], bh["arr"]["all"][last]["ratio"]
+            cls[h][label] = {"dep_ratio_daytime": dr, "arr_ratio_daytime": ar, "class": classify_hub(dr, ar, bt["dep"], bt["arr"])}
+        cls[h]["class"] = cls[h]["primary"]["class"]
     res["classification"] = cls
     out = ROOT / "backtest" / "results" / "a5b_opensky_hubs.json"
     out.write_text(json.dumps(res, indent=2, default=float))
