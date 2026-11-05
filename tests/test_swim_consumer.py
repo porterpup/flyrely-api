@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from swim import consumer
+from swim import archive, consumer
 from swim import inspect_tfms as it
 
 SECRETS = {
@@ -86,21 +86,41 @@ def test_auth_detection_is_specific():
     assert not consumer.is_auth_error("error code 40300")
 
 
-def test_truncated_final_chunk_is_tolerated(tmp_path):
+@pytest.mark.parametrize("codec", ["gzip", "zstd"])
+def test_truncated_final_chunk_is_tolerated(tmp_path, codec):
+    if codec == "zstd":
+        pytest.importorskip("zstandard")
+
     def rec(i):
         return (TS, consumer.encode_record(TS, {}, f"<a n='{i}'/>".encode()))
-    consumer.write_batch(tmp_path, [rec(1), rec(2)])
-    consumer.write_batch(tmp_path, [rec(3)])
-    f = next(tmp_path.glob("*/*.jsonl.gz"))
-    f.write_bytes(f.read_bytes()[:-10])  # simulate a crash mid-chunk
-    assert [r["body"] for r in it.iter_records(tmp_path)] == ["<a n='1'/>", "<a n='2'/>"]
+    w = archive.ArchiveWriter(tmp_path, "tfms", "r1", codec)
+    w.write_batch([rec(1), rec(2)])
+    w.write_batch([rec(3)])
+    f = w.path_for(TS)  # not closed: the process was killed after the last fsync
+    complete = f.read_bytes()
+    assert [r["body"] for r in it.iter_records(tmp_path)] == ["<a n='1'/>", "<a n='2'/>", "<a n='3'/>"]
+    w.write_batch([rec(4)])
+    f.write_bytes(f.read_bytes()[:len(complete) + 3])  # killed mid-write of batch 4
+    assert [r["body"] for r in it.iter_records(tmp_path)] == ["<a n='1'/>", "<a n='2'/>", "<a n='3'/>"]
+
+
+def test_restart_uses_a_new_file_so_a_torn_tail_cannot_hide_new_data(tmp_path):
+    w1 = archive.ArchiveWriter(tmp_path, "tfms", "run1", "gzip")
+    w1.write_batch([(TS, consumer.encode_record(TS, {}, b"<a n='1'/>"))])
+    f1 = w1.path_for(TS)
+    f1.write_bytes(f1.read_bytes()[:-6])
+    w2 = archive.ArchiveWriter(tmp_path, "tfms", "run2", "gzip")
+    w2.write_batch([(TS, consumer.encode_record(TS, {}, b"<a n='2'/>"))])
+    w2.close()
+    assert "<a n='2'/>" in [r["body"] for r in it.iter_records(tmp_path)]
+    assert len(list(tmp_path.glob("*/*.jsonl.gz"))) == 2
 
 
 def test_dedupe_fields_and_per_run_file(tmp_path):
     rec = json.loads(consumer.encode_record(TS, {}, b"hello", {"rgmid": "r1", "app_id": None, "sender_ts": 5}))
     assert rec["dedupe"]["rgmid"] == "r1" and rec["dedupe"]["sender_ts"] == 5
     assert len(rec["dedupe"]["sha256"]) == 64
-    assert consumer.RUN_ID in consumer.hour_path(tmp_path, TS).name
+    assert consumer.RUN_ID in archive.ArchiveWriter(tmp_path, "tfms", consumer.RUN_ID, "gzip").path_for(TS).name
 
 
 def test_inspector_property_allowlist():

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>swim.retention</string>
+        <string>--days</string>
+        <string>__RETENTION_DAYS__</string>
+        <string>--min-free-gb</string>
+        <string>__MIN_FREE_GB__</string>
+        <string>--alert</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FLYRELY_ENV_FILE</key>
+        <string>__ENV_FILE__</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>17</integer>
+    </dict>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/swim-retention.log</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/swim-retention.log</string>
+__DAEMON_KEYS__</dict>
+</plist>

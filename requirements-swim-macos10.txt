@@ -1,0 +1,8 @@
+# macOS 10.15 Catalina (Intel) only. solace-pubsubplus 1.7.0 and newer ship wheels tagged
+# macosx_11_0_universal2, which pip refuses on 10.15; 1.6.0 is the newest tagged macosx_10_15_x86_64.
+# NOT yet exercised against the live broker: run `python -m swim.consumer --source tfms --check`
+# first, then a short supervised run (see deploy/SPARE_MAC_RUNBOOK.md, step 6).
+python-dotenv>=1.0.0
+solace-pubsubplus==1.6.0
+certifi
+zstandard==0.25.0

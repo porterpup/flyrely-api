@@ -1,0 +1,22 @@
+{
+  "tfms": {
+    "airlines_only": true,
+    "airline_mode": "carriers",
+    "extra_carriers": [],
+    "keep_types": ["FlightTimes", "FlightCreate", "FlightModify", "FlightScheduleActivate",
+                   "flightPlanInformation", "flightPlanAmendmentInformation", "flightPlanCancellation",
+                   "departureInformation", "arrivalInformation"],
+    "track_types": ["trackInformation"],
+    "track_interval_min": 5,
+    "keep_flow": true,
+    "keep_status": true
+  },
+  "sfdps": {
+    "airlines_only": true,
+    "airline_mode": "carriers",
+    "extra_carriers": [],
+    "track_interval_min": 5,
+    "keep_message_types": []
+  },
+  "stdds": {"enabled": false}
+}

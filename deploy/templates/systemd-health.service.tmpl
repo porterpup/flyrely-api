@@ -1,0 +1,10 @@
+[Unit]
+Description=FlyRely SWIM health check
+
+[Service]
+Type=oneshot
+__USER_LINE__WorkingDirectory=__REPO__
+Environment=FLYRELY_ENV_FILE=__ENV_FILE__
+ExecStart=__PYTHON__ -m swim.health --sources __SOURCES__ --min-free-gb __MIN_FREE_GB__
+# exit 1 just means "problems were found (and alerted)"
+SuccessExitStatus=1

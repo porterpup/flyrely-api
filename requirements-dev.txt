@@ -4,3 +4,4 @@ pyarrow==26.0.0
 pytest
 # Timezone lookup for backtest/opensky_coverage.py (wheels exist for Linux/macOS, Python 3.11)
 timezonefinder==9.0.0
+zstandard==0.25.0
