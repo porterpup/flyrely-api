@@ -1,0 +1,25 @@
+[Unit]
+Description=FlyRely SWIM consumer (__SOURCE__)
+Wants=network-online.target
+After=network-online.target
+# at most 20 restarts per 15 minutes, then the unit stays failed (the health check alerts)
+StartLimitIntervalSec=900
+StartLimitBurst=20
+
+[Service]
+Type=simple
+__USER_LINE__WorkingDirectory=__REPO__
+Environment="FLYRELY_ENV_FILE=__ENV_FILE__"
+Environment=SCDS_TRUST_STORE_DIR=/etc/ssl/certs
+Environment=PYTHONUNBUFFERED=1
+ExecStart="__PYTHON__" -m swim.consumer --source __SOURCE__ --log-file "__LOG_DIR__/swim-__SOURCE__.log"
+Restart=on-failure
+RestartSec=15
+# Auth failures and config errors park in-process (the process stays up and waits), so there is no restart
+# loop. If a manual --exit-on-park run is ever wrapped in this unit, 3 and 2 must still never restart:
+RestartPreventExitStatus=2 3
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=__WANTED_BY__

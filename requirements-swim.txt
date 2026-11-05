@@ -2,3 +2,5 @@
 # FAA SWIM SCDS consumers (swim/). Not needed by the API image.
 solace-pubsubplus==1.11.0
 certifi
+# Archive compression. Optional: without it the archive falls back to gzip. Wheels exist for macOS 10.9+/11+ (see deploy/SPARE_MAC_RUNBOOK.md)
+zstandard==0.25.0

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 from swim import consumer
+from swim import archive
 from swim import inspect_tfms as it
 
 XML = """<?xml version="1.0"?>
@@ -44,11 +45,13 @@ def test_reg_in_other_info_and_absent():
 def test_archive_roundtrip_and_redact(tmp_path, monkeypatch):
     ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     recs = [(ts, consumer.encode_record(ts, {"k": "v"}, b"<a/>"))]
-    consumer.write_batch(tmp_path, recs)
-    consumer.write_batch(tmp_path, recs)  # second batch appends a new gzip member
+    w = archive.ArchiveWriter(tmp_path, "tfms", "r1", "gzip")
+    w.write_batch(recs)
+    w.write_batch(recs)  # same long-lived stream
+    w.close()
     files = list(tmp_path.glob("2026-01-02/*.jsonl.gz"))
     assert len(files) == 1 and "20260102T03" in files[0].name
-    lines = gzip.open(files[0], "rt").read().splitlines()
+    lines = gzip.open(files[0], "rt").read().splitlines()  # a normal gzip reader reads a closed stream
     assert len(lines) == 2 and json.loads(lines[0])["body"] == "<a/>"
     monkeypatch.setenv("SCDS_TFMS_PASSWORD", "s3cret-pw")
     assert "s3cret-pw" not in consumer.redact("fail with s3cret-pw")

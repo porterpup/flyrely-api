@@ -37,3 +37,6 @@ backtest/results/*_quick.json
 
 # Generated accuracy reports
 reports/
+
+# SWIM service logs (deploy/install_services.py)
+logs/
