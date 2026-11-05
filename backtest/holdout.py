@@ -19,6 +19,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 LOCKED_FROM = "2026-09"                                   # first protected month
 LOCKED_FROM_TS = pd.Timestamp(f"{LOCKED_FROM}-01")
+# Only these months may ever be unlocked. October 2026 on stays refused until the policy (protocol section 7) is
+# approved and this tuple is changed in a reviewed commit. fetch_bts.sh mirrors it (UNLOCKABLE).
+UNLOCKABLE = ("2026-09",)
 LAST_ALLOWED_DATE = (LOCKED_FROM_TS - pd.Timedelta(days=1)).date()   # 2026-08-31
 UNLOCK_VAR = "FLYRELY_HOLDOUT_UNLOCK"
 HOLDOUT_ROOT = ROOT / "data" / "holdout"
@@ -70,7 +73,7 @@ def unlocked_month(holdout_arg: str | None = None, env=None) -> str | None:
         raise SystemExit(f"invalid holdout month: --holdout '{holdout_arg}', {UNLOCK_VAR}='{val}' (expected YYYY-MM)")
     if val != holdout_arg:
         return None
-    return holdout_arg if is_locked_month(holdout_arg) else None
+    return holdout_arg if (is_locked_month(holdout_arg) and holdout_arg in UNLOCKABLE) else None
 
 
 def require_unlock(holdout_arg: str, env=None) -> str:
@@ -79,6 +82,9 @@ def require_unlock(holdout_arg: str, env=None) -> str:
         raise SystemExit(f"invalid --holdout '{holdout_arg}': expected YYYY-MM")
     if not is_locked_month(holdout_arg):
         raise SystemExit(f"--holdout {holdout_arg} is not a protected month (the holdout starts at {LOCKED_FROM})")
+    if holdout_arg not in UNLOCKABLE:
+        raise SystemExit(f"refusing --holdout {holdout_arg}: only {', '.join(UNLOCKABLE)} may be unlocked "
+                         "(later months stay locked until the policy in protocol section 7 is approved)")
     if unlocked_month(holdout_arg, env) != holdout_arg:
         raise SystemExit(f"refusing --holdout {holdout_arg}: the holdout is locked. Prefix this one command with "
                          f"{UNLOCK_VAR}={holdout_arg} (never export it)")

@@ -60,7 +60,10 @@ def load_months(start: str, end: str, holdout_dir: Path = None) -> pd.DataFrame:
         if not _holdout.is_locked_month(ym):
             frames.append(pd.read_parquet(PARQUET / f"{ym}.parquet"))
             continue
-        if holdout_dir is None or holdout_dir.parent.name != ym:
+        if _holdout.unlocked_month(ym) != ym:       # the loader checks the unlock itself, not only its callers
+            raise RuntimeError(f"{ym} is in the protected holdout and is not unlocked "
+                               f"({_holdout.UNLOCK_VAR}={ym} with --holdout {ym} is required)")
+        if holdout_dir is None or Path(holdout_dir).parent.name != ym:
             raise RuntimeError(f"{ym} is in the protected holdout (>= {_holdout.LOCKED_FROM}): "
                                "it loads only from data/holdout/YYYY-MM/bts by an unlocked holdout stage")
         part = pd.read_parquet(Path(holdout_dir) / f"{ym}.parquet")

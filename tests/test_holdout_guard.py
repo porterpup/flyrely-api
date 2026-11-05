@@ -67,6 +67,17 @@ def test_unlock_opens_only_the_named_month(monkeypatch):
             holdout.require_unlock(other)
 
 
+def test_only_the_allowlisted_month_can_be_unlocked(monkeypatch):
+    assert holdout.UNLOCKABLE == ("2026-09",)
+    for m in ("2026-10", "2026-11", "2027-01"):
+        assert holdout.unlocked_month(m, {UNLOCK: m}) is None          # named by both, still refused
+        monkeypatch.setenv(UNLOCK, m)
+        with pytest.raises(SystemExit, match="only"):
+            holdout.require_unlock(m)
+        with pytest.raises(SystemExit):
+            holdout.check_end_date(f"{m}-02", m)
+
+
 def test_old_unlock_value_one_is_refused(monkeypatch):
     with pytest.raises(SystemExit) as err:
         holdout.unlocked_month(MONTH, {UNLOCK: "1"})
@@ -340,11 +351,17 @@ def test_load_months_never_reads_a_holdout_month_from_the_main_folder(tmp_path, 
     assert len(bt.load_months("2026-08", "2026-08")) == 1
     with pytest.raises(RuntimeError, match="protected holdout"):
         bt.load_months("2026-08", MONTH)
-    with pytest.raises(RuntimeError, match="protected holdout"):
-        bt.load_months("2026-08", MONTH, holdout_dir=tmp_path / "elsewhere" / "bts")   # wrong folder
     hd = hroot / MONTH / "bts"
     hd.mkdir(parents=True)
     month_frame(MONTH, ["2026-09-04"]).to_parquet(hd / "2026-09.parquet")
+    with pytest.raises(RuntimeError, match="not unlocked"):                    # right folder, but no unlock
+        bt.load_months("2026-08", MONTH, holdout_dir=hd)
+    monkeypatch.setenv(UNLOCK, "2026-10")
+    with pytest.raises(RuntimeError, match="not unlocked"):                    # another month's unlock
+        bt.load_months("2026-08", MONTH, holdout_dir=hd)
+    monkeypatch.setenv(UNLOCK, MONTH)
+    with pytest.raises(RuntimeError, match="protected holdout"):
+        bt.load_months("2026-08", MONTH, holdout_dir=tmp_path / "elsewhere" / "bts")   # wrong folder
     df = bt.load_months("2026-08", MONTH, holdout_dir=hd)
     assert list(df["ym"]) == ["2026-08", "2026-09"] and df["FlightDate"].iloc[-1] == pd.Timestamp("2026-09-04")
     month_frame(MONTH, ["2026-09-04", "2026-10-01"]).to_parquet(hd / "2026-09.parquet")
@@ -385,6 +402,7 @@ def test_fetch_bts_sh_holdout_policy(shell, tmp_path):
              (("--holdout", MONTH), {UNLOCK: "2026-10"}),                   # another month
              (("--holdout", "2026-10"), {UNLOCK: MONTH}),                   # another month's flag
              (("--holdout", "2026-08"), {UNLOCK: "2026-08"}),               # not a protected month
+             (("--holdout", "2026-10"), {UNLOCK: "2026-10"}),               # protected but not allowlisted
              (("--holdout", "2026-9"), {UNLOCK: MONTH}),                    # malformed
              (("--holdout", MONTH, "2026"), {UNLOCK: MONTH}),               # extra args
              (("2026", "2026", "9"), {UNLOCK: MONTH}),                      # normal form refuses September always
@@ -445,42 +463,178 @@ def fake_manifest(tmp_path):
     models = tmp_path / "models"
     models.mkdir()
     (models / "1d_base.joblib").write_bytes(b"model bytes")
-    manifest = {"models": {"1d_base": {"file": "1d_base.joblib", "sha256": e.sha256_file(models / "1d_base.joblib")}}}
+    manifest = {"holdout_month": MONTH, "code": {"commit": "abc"},
+                "models": {"1d_base": {"file": "1d_base.joblib", "sha256": e.sha256_file(models / "1d_base.joblib")}}}
     mp = tmp_path / "manifest.json"
     mp.write_text(json.dumps(manifest))
     return manifest, mp, models
 
 
-def test_score_refuses_without_unlock_manifest_matching_hashes_or_a_second_run(tmp_path, monkeypatch):
+@pytest.fixture
+def score_env(tmp_path, hroot, monkeypatch):
+    """Everything preflight needs, faked: models, manifest, airports file, git, a passing check marker."""
     manifest, mp, models = fake_manifest(tmp_path)
-    result = tmp_path / "h1_b5_1_2026-09.json"
-    with pytest.raises(SystemExit, match="locked"):                          # no unlock
-        e.preflight_score(MONTH, False, result, mp, models)
+    manifest["airports_file_sha256"] = e.sha256_file(holdout.AIRPORTS_FILE)
+    mp.write_text(json.dumps(manifest))
+    res = tmp_path / "results"
+    res.mkdir()
     monkeypatch.setenv(UNLOCK, MONTH)
-    assert e.preflight_score(MONTH, False, result, mp, models) == manifest   # all good
+    monkeypatch.setattr(e, "verify_frozen_code", lambda m: None)
+    (hroot / MONTH / "metar").mkdir(parents=True)
+    (hroot / MONTH / "metar" / "ATL_2026-09.csv").write_text("data")
+    e.check_marker_path(MONTH, res).write_text(json.dumps({"files": e.hash_holdout_files(MONTH)}))
+    return manifest, mp, models, res
+
+
+def preflight(env, **kw):
+    manifest, mp, models, res = env
+    return e.preflight_score(MONTH, results_dir=res, manifest_path=mp, models_dir=models, **kw)
+
+
+def test_score_preflight_refusals(score_env, hroot, monkeypatch):
+    manifest, mp, models, res = score_env
+    m, out = preflight(score_env)
+    assert m == manifest and out == res / "h1_b5_1_2026-09.json"
+    monkeypatch.delenv(UNLOCK)
+    with pytest.raises(SystemExit, match="locked"):                          # no unlock
+        preflight(score_env)
+    monkeypatch.setenv(UNLOCK, MONTH)
     with pytest.raises(SystemExit, match="missing"):                         # no manifest
-        e.preflight_score(MONTH, False, result, tmp_path / "nope.json", models)
+        e.preflight_score(MONTH, results_dir=res, manifest_path=res / "nope.json", models_dir=models)
+    mp.write_text(json.dumps({**manifest, "holdout_month": "2026-10"}))
+    with pytest.raises(SystemExit, match="manifest is for"):                 # manifest for another month
+        preflight(score_env)
+    mp.write_text(json.dumps({**manifest, "airports_file_sha256": "0" * 64}))
+    with pytest.raises(SystemExit, match="airports"):                        # airport lists changed
+        preflight(score_env)
+    mp.write_text(json.dumps(manifest))
     (models / "1d_base.joblib").write_bytes(b"tampered")
     with pytest.raises(SystemExit, match="manifest"):                        # hash mismatch
-        e.preflight_score(MONTH, False, result, mp, models)
+        preflight(score_env)
     (models / "1d_base.joblib").write_bytes(b"model bytes")
-    (models / "1d_base.joblib").unlink()
-    with pytest.raises(SystemExit, match="manifest"):                        # model file gone
-        e.preflight_score(MONTH, False, result, mp, models)
-    (models / "1d_base.joblib").write_bytes(b"model bytes")
-    result.write_text("{}")
-    with pytest.raises(SystemExit, match="once"):                            # second run
-        e.preflight_score(MONTH, False, result, mp, models)
-    assert e.preflight_score(MONTH, True, result, mp, models) == manifest    # the bug-fix case only
-    monkeypatch.setenv(UNLOCK, "2026-10")
-    with pytest.raises(SystemExit):                                          # another month's unlock
-        e.preflight_score(MONTH, True, result, mp, models)
+    (hroot / MONTH / "metar" / "ATL_2026-09.csv").write_text("changed")
+    with pytest.raises(SystemExit, match="changed since"):                   # data changed after check passed
+        preflight(score_env)
+    (hroot / MONTH / "metar" / "ATL_2026-09.csv").write_text("data")
+    e.check_marker_path(MONTH, res).unlink()
+    with pytest.raises(SystemExit, match="marker"):                          # check never passed
+        preflight(score_env)
 
 
-def test_score_never_fits_a_model():
-    import inspect
-    assert "fit_calibrated" not in inspect.getsource(e.stage_score)
-    assert "fit_calibrated" not in inspect.getsource(e.stage_check)
+def test_frozen_code_is_enforced(monkeypatch):
+    class R:
+        def __init__(self, out="", rc=0):
+            self.stdout, self.returncode = out, rc
+    state = {"dirty": "", "head": "t1", "freeze": "t1"}
+
+    def fake_git(*a):
+        if a[0] == "status":
+            return R(state["dirty"])
+        return R(state["head"] if a[1].startswith("HEAD:") else state["freeze"])
+
+    monkeypatch.setattr(e, "_git", fake_git)
+    manifest = {"code": {"commit": "abcdef0123456789"}}
+    e.verify_frozen_code(manifest)
+    state["dirty"] = " M flyrely_features/faa.py"
+    with pytest.raises(SystemExit, match="uncommitted"):
+        e.verify_frozen_code(manifest)
+    state.update(dirty="", head="t2")
+    with pytest.raises(SystemExit, match="differ from the freeze commit"):
+        e.verify_frozen_code(manifest)
+
+
+def test_attempt_record_and_reruns_never_overwrite(score_env):
+    manifest, mp, models, res = score_env
+    _, out = preflight(score_env)
+    e.record_attempt(MONTH, out, manifest, results_dir=res)                  # written before any data is loaded
+    with pytest.raises(SystemExit, match="scored once"):                     # interrupted run: no result file yet
+        preflight(score_env)
+    with pytest.raises(SystemExit, match="--reason"):
+        preflight(score_env, force=True)
+    out.write_text('{"original": true}')
+    _, r1 = preflight(score_env, force=True, reason="bug in X")
+    assert r1.name == "h1_b5_1_2026-09_rerun1.json" and out.read_text() == '{"original": true}'
+    e.record_attempt(MONTH, r1, manifest, "bug in X", results_dir=res)
+    r1.write_text("{}")
+    _, r2 = preflight(score_env, force=True, reason="another")
+    assert r2.name.endswith("_rerun2.json")
+    recs = json.loads((res / "h1_b5_1_2026-09.attempts.json").read_text())
+    assert [r["output"] for r in recs] == ["h1_b5_1_2026-09.json", "h1_b5_1_2026-09_rerun1.json"] and recs[1]["reason"] == "bug in X"
+
+
+def test_force_rerun_with_no_earlier_attempt_is_refused(score_env):
+    with pytest.raises(SystemExit, match="no earlier attempt"):
+        preflight(score_env, force=True, reason="x")
+
+
+def test_score_never_fits_a_model(tmp_path, monkeypatch):
+    """Run the whole score stage on tiny stub data with every fit method set to raise."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.isotonic import IsotonicRegression
+    import joblib
+    import experiments_b5
+    rng = np.random.default_rng(0)
+    base, a_c, b_c = ["b1", "b2"], ["mt_o_x", "mt_d_x"], ["faa_o_x", "faa_d_x"]
+    allc = base + a_c + b_c
+    Xt = pd.DataFrame(rng.random((200, 6)), columns=allc)
+    yt = (rng.random(200) < 0.3).astype(int)
+    models = tmp_path / "models"
+    models.mkdir()
+    manifest = {"holdout_month": MONTH, "code": {"commit": "x"}, "models": {}, "feature_columns": {}}
+
+    def add(name, cols):
+        m = HistGradientBoostingClassifier(max_iter=5).fit(Xt[cols], yt)
+        iso = IsotonicRegression(out_of_bounds="clip").fit(m.predict_proba(Xt[cols])[:, 1], yt)
+        joblib.dump({"model": m, "iso": iso, "columns": cols}, models / f"{name}.joblib")
+        manifest["models"][name] = {"file": f"{name}.joblib", "sha256": e.sha256_file(models / f"{name}.joblib")}
+
+    add("booking", ["b1", "b2"])
+    for h, sources in e.TESTS.items():
+        cols = {"base": base, "A": base + a_c, "B": base + b_c, "AB": base + a_c + b_c}
+        manifest["feature_columns"][h] = base + (a_c if "A" in sources else []) + (b_c if "B" in sources else [])
+        for arm in ["base"] + [a for a in ("A", "B", "AB") if set(a) <= set(sources)]:
+            add(f"{h}_{arm}", cols[arm])
+    mp = tmp_path / "manifest.json"
+    mp.write_text(json.dumps(manifest))
+    res = tmp_path / "results"
+    res.mkdir()
+    n = 300
+    ev = pd.DataFrame({"FlightDate": pd.date_range("2026-09-01", periods=30).repeat(10), "cancelled": False,
+                       "delayed": (rng.random(n) < 0.2).astype(float), "disrupted": (rng.random(n) < 0.25).astype(float),
+                       "ym": MONTH})
+
+    class Stub:
+        ok = True
+        n_airports = 3
+
+        def features(self, A, rows, h):
+            return {c: rng.random(len(rows)) for c in ([c for c in a_c] if self.kind == "A" else b_c)}
+
+    M_, P_ = Stub(), Stub()
+    M_.kind, P_.kind = "A", "B"
+    M_.max_valid = None
+    ctx = {"df": ev, "A": {}, "W": Stub(), "C": None, "R": None, "M": M_, "P": P_,
+           "prog": pd.DataFrame({"kind": ["GS"], "status": ["active"]})}
+    monkeypatch.setattr(e, "build_context", lambda month: ctx)
+    monkeypatch.setattr(e.runup, "horizon_features", lambda A, C, R, W, rows, h, bX, wk: pd.DataFrame(
+        rng.random((len(rows), 2)), columns=base))
+    monkeypatch.setattr(e.bt, "booking_features", lambda frame, hist: pd.DataFrame(rng.random((len(frame), 2)), columns=base))
+    monkeypatch.setattr(e, "MANIFEST", mp)
+    monkeypatch.setattr(e, "MODELS_DIR", models)
+    monkeypatch.setattr(e, "RESULTS", res)
+    monkeypatch.setattr(e, "preflight_score", lambda month, force=False, reason=None: (manifest, res / f"h1_b5_1_{month}.json"))
+
+    def boom(*a, **k):
+        raise AssertionError("score must never fit a model")
+
+    for target in (HistGradientBoostingClassifier, IsotonicRegression):
+        monkeypatch.setattr(target, "fit", boom)
+    monkeypatch.setattr(e.bt, "fit_calibrated", boom)
+    e.stage_score(MONTH)
+    r = json.loads((res / f"h1_b5_1_{MONTH}.json").read_text())
+    assert set(r["gated"]) == {"H1-B-1d", "H1-A-3h", "H1-B-3h", "H1-A-1h", "H1-B-1h"}
+    assert all(g["outcome"] in ("confirmed", "not_confirmed", "contradicted") for g in r["gated"].values())
+    assert len(json.loads((res / f"h1_b5_1_{MONTH}.attempts.json").read_text())) == 1
 
 
 def test_freeze_is_refused_when_holdout_data_is_present(hroot, monkeypatch):
@@ -507,6 +661,8 @@ def test_check_and_score_need_the_unlock(hroot):
 def test_cli_rules(monkeypatch):
     with pytest.raises(SystemExit):
         e.holdout_cli(["--holdout", MONTH, "--stage", "freeze", "--force-rerun"])
+    with pytest.raises(SystemExit):
+        e.holdout_cli(["--holdout", MONTH, "--stage", "score", "--reason", "no force flag"])
     with pytest.raises(SystemExit):
         e.holdout_cli(["--stage", "freeze"])                                  # --holdout is required
     with pytest.raises(SystemExit):

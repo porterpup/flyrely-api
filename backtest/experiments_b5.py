@@ -279,19 +279,98 @@ def verify_models(manifest: dict, models_dir: Path = None) -> None:
         raise SystemExit("frozen models do not match the manifest:\n  " + "\n  ".join(bad))
 
 
-def preflight_score(month: str, force: bool = False, result_path: Path = None, manifest_path: Path = None,
-                    models_dir: Path = None) -> dict:
-    """Everything `score` must satisfy before it touches any holdout data. Returns the manifest."""
+TREE_PATHS = ["flyrely_features", "backtest/runup.py", "backtest/backtest.py", "backtest/experiments_b5.py",
+              "backtest/holdout.py", "backtest/fetch_faa_adv.py"]       # code that must equal the freeze commit's
+
+
+def _git(*args):
+    return subprocess.run(["git", *args], cwd=HERE.parent, capture_output=True, text=True)
+
+
+def verify_frozen_code(manifest: dict) -> None:
+    """Refuse a dirty tree, and refuse unless the feature/run code equals the code of the manifest's freeze commit
+    (compared by git tree/blob hash, so later commits that touch other files, such as the report, are fine)."""
+    if _git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        raise SystemExit("score refused: the working tree has uncommitted changes to tracked files")
+    commit = manifest["code"]["commit"]
+    bad = []
+    for p in TREE_PATHS:
+        a, b = _git("rev-parse", f"HEAD:{p}"), _git("rev-parse", f"{commit}:{p}")
+        if a.returncode or b.returncode or a.stdout.strip() != b.stdout.strip():
+            bad.append(p)
+    if bad:
+        raise SystemExit(f"score refused: {bad} differ from the freeze commit {commit[:10]}. "
+                         "Re-run `--stage freeze` at the merged code and commit the new manifest first")
+
+
+def verify_airports(manifest: dict) -> None:
+    if not holdout.AIRPORTS_FILE.exists() or sha256_file(holdout.AIRPORTS_FILE) != manifest.get("airports_file_sha256"):
+        raise SystemExit("score refused: h1_airports.json does not match the manifest (airport lists are frozen)")
+
+
+def hash_holdout_files(month: str) -> dict:
+    d = holdout.holdout_dir(month)
+    return {str(p.relative_to(d)): sha256_file(p) for p in sorted(d.rglob("*")) if p.is_file()} if d.exists() else {}
+
+
+def check_marker_path(month: str, results_dir: Path = None) -> Path:
+    return (results_dir or RESULTS) / f"h1_check_{month}.pass.json"
+
+
+def verify_check_marker(month: str, results_dir: Path = None) -> None:
+    """Stage 2a must have passed on exactly the data files that are on disk now."""
+    f = check_marker_path(month, results_dir)
+    if not f.exists():
+        raise SystemExit(f"score refused: no passing stage-2a marker ({f.name}); run `--stage check` until it passes")
+    if json.loads(f.read_text())["files"] != hash_holdout_files(month):
+        raise SystemExit("score refused: the holdout data changed since `check` passed; repeat `--stage check`")
+
+
+def preflight_score(month: str, force: bool = False, reason: str = None, results_dir: Path = None,
+                    manifest_path: Path = None, models_dir: Path = None) -> tuple[dict, Path]:
+    """Everything `score` must satisfy before it touches any holdout data. Returns (manifest, result path).
+
+    The original result file is never overwritten: a re-run (only with --force-rerun and a --reason) writes
+    h1_b5_1_<month>_rerun<N>.json next to it."""
     holdout.require_unlock(month)
     manifest = load_manifest(manifest_path)
+    if manifest.get("holdout_month") != month:
+        raise SystemExit(f"score refused: the manifest is for {manifest.get('holdout_month')}, not {month}")
     verify_models(manifest, models_dir)
-    result_path = result_path or RESULTS / f"h1_b5_1_{month}.json"
-    if result_path.exists():
-        if not force:
-            raise SystemExit(f"{result_path} exists: the holdout is scored once. --force-rerun exists only for the "
-                             "bug-fix case of the protocol (section 4, item 3)")
-        log(f"FORCE-RERUN: replacing {result_path} (protocol section 4, item 3: report both runs, reviewer sign-off)")
-    return manifest
+    verify_airports(manifest)
+    verify_frozen_code(manifest)
+    verify_check_marker(month, results_dir)
+    results_dir = results_dir or RESULTS
+    orig = results_dir / f"h1_b5_1_{month}.json"
+    attempts = results_dir / f"h1_b5_1_{month}.attempts.json"
+    n = len(json.loads(attempts.read_text())) if attempts.exists() else 0
+    if not (n or orig.exists()):
+        if force:
+            raise SystemExit("--force-rerun refused: there is no earlier attempt to re-run")
+        return manifest, orig
+    if not force:
+        raise SystemExit(f"{attempts.name if n else orig.name} exists: the holdout is scored once (an attempt is recorded "
+                         "before any data is loaded). --force-rerun --reason exists only for the bug-fix case "
+                         "of the protocol (section 4, item 3)")
+    if not (reason or "").strip():
+        raise SystemExit("--force-rerun needs --reason \"<why>\" (it is recorded in the result)")
+    k = max(n, 1)
+    while (results_dir / f"h1_b5_1_{month}_rerun{k}.json").exists():
+        k += 1
+    log(f"FORCE-RERUN {k}: {reason} (protocol section 4, item 3: the original result is kept, both are reported)")
+    return manifest, results_dir / f"h1_b5_1_{month}_rerun{k}.json"
+
+
+def record_attempt(month: str, out: Path, manifest: dict, reason: str = None, results_dir: Path = None) -> None:
+    """Written BEFORE any holdout data is loaded, so an interrupted run still counts as the one attempt."""
+    f = (results_dir or RESULTS) / f"h1_b5_1_{month}.attempts.json"
+    rec = json.loads(f.read_text()) if f.exists() else []
+    rec.append({"started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "output": out.name,
+                "code_commit": _git("rev-parse", "HEAD").stdout.strip(), "reason": reason,
+                "models_sha256": {k: v["sha256"] for k, v in manifest["models"].items()}})
+    tmp = f.with_suffix(".part")
+    tmp.write_text(json.dumps(rec, indent=2) + "\n")
+    tmp.rename(f)
 
 
 def horizon_X(A, C, R, W, M, P, rows, h, booking_X, sources) -> pd.DataFrame:
@@ -381,7 +460,7 @@ def build_context(month: str = None) -> dict:
         prog = pd.concat([prog, pd.read_parquet(f)], ignore_index=True)
         if df["FlightDate"].max() > pd.Timestamp(holdout.month_bounds(month)[1]):
             raise RuntimeError("BTS rows after the holdout month (refused)")
-        if W.ok and W.max_utc >= end or (M.ok and M.max_valid is not None and M.max_valid > end) or prog["sent_utc"].max() >= end:
+        if W.ok and W.max_utc >= end or (M.ok and M.max_valid is not None and M.max_valid >= end) or prog["sent_utc"].max() >= end:
             raise RuntimeError(f"inputs run past the {month} window ({last}); refused")
         covered = holdout.frozen_airports("faa_covered")
     P = faa.Programs(prog, A["airports"], covered)
@@ -414,8 +493,9 @@ def stage_freeze(month: str, models_dir: Path = None, manifest_path: Path = None
     if present:
         raise SystemExit(f"freeze refused: holdout data is already present: {present[:5]}")
     models_dir, manifest_path = models_dir or MODELS_DIR, manifest_path or MANIFEST
-    cache = HERE.parent / "data" / "cache" / f"b5_1_holdout_{month}"
-    cache.mkdir(parents=True, exist_ok=True)
+    # always from scratch: a fresh run folder (never reuse an earlier cache; nothing under data/ is deleted)
+    cache = HERE.parent / "data" / "cache" / f"b5_1_holdout_{month}" / time.strftime("run_%Y%m%d_%H%M%S")
+    cache.mkdir(parents=True)
     models_dir.mkdir(parents=True, exist_ok=True)
     ref = json.loads(B5_1_RESULTS.read_text())
 
@@ -463,12 +543,8 @@ def stage_freeze(month: str, models_dir: Path = None, manifest_path: Path = None
     for h, sources in TESTS.items():
         X = {}
         for k in ("fit", "val", "eval"):
-            f = cache / f"X_{h}_{k}.parquet"
-            if f.exists():
-                X[k] = pd.read_parquet(f)
-            else:
-                X[k] = horizon_X(A, C, R, W, M, P, rows[k], h, booking_X[k], sources)
-                X[k].to_parquet(f)
+            X[k] = horizon_X(A, C, R, W, M, P, rows[k], h, booking_X[k], sources)
+            X[k].to_parquet(cache / f"X_{h}_{k}.parquet")
             old = CACHE / f"X_{h}_{k}.parquet"
             try:
                 pd.testing.assert_frame_equal(X[k], pd.read_parquet(old), check_exact=True)
@@ -623,13 +699,20 @@ def stage_check(month: str, models_dir: Path = None, manifest_path: Path = None)
         cov = float(pd.Series(M.features(A, rows, HORIZONS[h])["mt_o_ceiling_ft"]).notna().mean())
         report(f"metar origin coverage of holdout flights at {h} >= 85%", cov >= 0.85, f"{cov:.1%}")
     ok = all(results)
+    if ok:
+        mf = check_marker_path(month)
+        mf.write_text(json.dumps({"month": month, "files": hash_holdout_files(month),
+                                  "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=1) + "\n")
+    elif check_marker_path(month).exists():
+        check_marker_path(month).unlink()          # a failed check invalidates an earlier pass
     print("ALL CHECKS PASSED" if ok else "CHECKS FAILED: fix the data and repeat stage 2a (no score has been computed)")
     return ok
 
 
-def stage_score(month: str, force: bool = False) -> None:
+def stage_score(month: str, force: bool = False, reason: str = None) -> None:
     """The one scoring run: frozen models (hashes checked), holdout features, decide. Never fits."""
-    manifest = preflight_score(month, force)
+    manifest, out = preflight_score(month, force, reason)
+    record_attempt(month, out, manifest, reason)
     ctx = build_context(month)
     df, A, W, C, R, M, P = (ctx[k] for k in ("df", "A", "W", "C", "R", "M", "P"))
     rows = np.flatnonzero((df["ym"] == month).to_numpy())
@@ -642,8 +725,8 @@ def stage_score(month: str, force: bool = False) -> None:
                "rates_b5_1_window": ("2025-01", "2025-12")}
     within = lambda a, b: np.flatnonzero(((df["ym"] >= a) & (df["ym"] <= b)).to_numpy())
     booking_X = {k: bt.booking_features(ev, df.iloc[within(*w)]).astype("float32") for k, w in windows.items()}
-    out_name = f"h1_b5_1_{month}.json"
-    results = {"protocol": PROTOCOL_H1, "holdout_month": month, "force_rerun": bool(force),
+    results = {"protocol": PROTOCOL_H1, "holdout_month": month,
+               "force_rerun": {"reason": reason, "output": out.name} if force else None,
                "code": git_state(), "manifest_sha256": sha256_file(MANIFEST), "models": manifest["models"],
                "windows": windows,
                "coverage": {"metar_airports": int(M.n_airports), "faa_airports": int(P.n_airports),
@@ -678,11 +761,9 @@ def stage_score(month: str, force: bool = False) -> None:
             d = results[h]["vs_base"][s]
             gated[f"H1-{s}-{h}"] = {"brier_diff": d["diff"], "ci95": d["ci95"], "ece_with": d["ece_with"],
                                     "ece_base": d["ece_base"], "outcome": d["outcome"]}
-        log(h, {s: results[h]["outcome"][s] for s in sources})
     results["gated"] = gated
     results["confirmed_horizons"] = {s: [h for h in TESTS if s in TESTS[h] and results[h]["outcome"][s] == "confirmed"]
                                      for s in ("A", "B")}
-    out = RESULTS / out_name
     out.write_text(json.dumps(results, indent=2, default=float))
     log("wrote", out, {k: v["outcome"] for k, v in gated.items()})
     log("now check that the unlock is not set: env | grep FLYRELY_HOLDOUT || echo OK")
@@ -692,17 +773,21 @@ def holdout_cli(argv=None) -> None:
     ap = argparse.ArgumentParser(description="H1 holdout stages (PROTOCOL_B5_1_HOLDOUT.md)")
     ap.add_argument("--holdout", metavar="YYYY-MM", required=True)
     ap.add_argument("--stage", choices=["freeze", "check", "score"], required=True)
-    ap.add_argument("--force-rerun", action="store_true", help="score: only for the protocol's bug-fix case (section 4)")
+    ap.add_argument("--force-rerun", action="store_true", help="score: only for the protocol's bug-fix case (section 4); "
+                    "writes h1_b5_1_<month>_rerun<N>.json and never replaces the original")
+    ap.add_argument("--reason", help="score --force-rerun: why (recorded in the result)")
     a = ap.parse_args(argv)
-    if a.force_rerun and a.stage != "score":
-        raise SystemExit("--force-rerun applies to --stage score only")
+    if (a.force_rerun or a.reason) and a.stage != "score":
+        raise SystemExit("--force-rerun/--reason apply to --stage score only")
+    if a.reason and not a.force_rerun:
+        raise SystemExit("--reason is for --force-rerun")
     RESULTS.mkdir(exist_ok=True)
     if a.stage == "freeze":
         stage_freeze(a.holdout)
     elif a.stage == "check":
         sys.exit(0 if stage_check(a.holdout) else 1)
     else:
-        stage_score(a.holdout, a.force_rerun)
+        stage_score(a.holdout, a.force_rerun, a.reason)
 
 
 if __name__ == "__main__":

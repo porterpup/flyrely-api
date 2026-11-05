@@ -10,6 +10,7 @@
 # (the old value 1 is refused).
 set -eu
 HOLDOUT_START=2026-09
+UNLOCKABLE="2026-09"   # months that may ever be unlocked (mirrors holdout.UNLOCKABLE)
 HS_Y=${HOLDOUT_START%-*}; HS_M=$(expr "${HOLDOUT_START#*-}" + 0)
 
 if [ "${1-}" = "--holdout" ]; then
@@ -23,6 +24,10 @@ if [ "${1-}" = "--holdout" ]; then
   if [ "$HY" -lt "$HS_Y" ] || { [ "$HY" -eq "$HS_Y" ] && [ "$HM" -lt "$HS_M" ]; }; then
     echo "--holdout $MONTH is not a protected month (the holdout starts at $HOLDOUT_START)" >&2; exit 2
   fi
+  case " $UNLOCKABLE " in
+    *" $MONTH "*) ;;
+    *) echo "refusing --holdout $MONTH: only $UNLOCKABLE may be unlocked (later months stay locked until the policy is approved)" >&2; exit 2;;
+  esac
   if [ "${FLYRELY_HOLDOUT_UNLOCK:-}" = "1" ]; then
     echo "FLYRELY_HOLDOUT_UNLOCK=1 is no longer accepted: the holdout unlock must name the month (FLYRELY_HOLDOUT_UNLOCK=$MONTH)" >&2
     exit 2
