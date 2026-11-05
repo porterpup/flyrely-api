@@ -13,13 +13,15 @@ WEATHER = Path(__file__).resolve().parent.parent / "data" / "weather"
 class Weather:
     """Archived forecasts per airport and UTC hour (Open-Meteo Previous Runs)."""
 
-    def __init__(self, airports: pd.Index, weather_dir: Path = None):
-        files = sorted((weather_dir or WEATHER).glob("*.parquet"))
+    def __init__(self, airports: pd.Index, weather_dir: Path = None, weather_dirs=()):
+        """`weather_dirs`: extra folders read after the main one (the unlocked holdout month's folder)."""
+        files = sorted((weather_dir or WEATHER).glob("*.parquet")) + [f for d in weather_dirs for f in sorted(Path(d).glob("*.parquet"))]
         self.ok = bool(files)
         if not self.ok:
             return
         w = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
         self.n_airports = w["airport"].nunique()
+        self.max_utc = w["utc_hour"].max()      # the experiments hard-fail when this reaches the protected holdout
         ap = airports.get_indexer(w["airport"])
         hour = ((w["utc_hour"] - DAY0) / pd.Timedelta(hours=1)).astype(np.int64).to_numpy()
         keep = ap >= 0

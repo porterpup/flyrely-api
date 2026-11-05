@@ -29,6 +29,7 @@ from flyrely_features.booking import (  # noqa: E402  shared with serving; re-ex
     SMOOTHING, booking_features, days_to_holiday, smoothed_rate,
 )
 from paths import BTS_PARQUET as PARQUET  # noqa: E402  the one constant for the BTS data dir
+import holdout as _holdout  # noqa: E402  the one holdout policy (backtest/holdout.py)
 RESULTS = Path(__file__).resolve().parent / "results"
 # The registered result (results.json, calibration.png, booking_model_candidate.joblib) was produced on the
 # original data and must stay intact; re-runs on the all-carrier Marketing data write *_v2data files.
@@ -48,9 +49,23 @@ LOW, HIGH = 0.20, 0.30  # calibration v2 tier thresholds used in production
 # Data
 # =============================================================================
 
-def load_months(start: str, end: str) -> pd.DataFrame:
+def load_months(start: str, end: str, holdout_dir: Path = None) -> pd.DataFrame:
+    """Months start..end from the main folder. A protected holdout month (2026-09 on) is never read from there:
+    it loads only from `holdout_dir` (data/holdout/YYYY-MM/bts, passed by the unlocked holdout stages), and only
+    that one month's file, with no row outside the month."""
     months = pd.period_range(start, end, freq="M")
-    frames = [pd.read_parquet(PARQUET / f"{m.year}-{m.month:02d}.parquet") for m in months]
+    frames = []
+    for m in months:
+        ym = f"{m.year}-{m.month:02d}"
+        if not _holdout.is_locked_month(ym):
+            frames.append(pd.read_parquet(PARQUET / f"{ym}.parquet"))
+            continue
+        if holdout_dir is None or holdout_dir.parent.name != ym:
+            raise RuntimeError(f"{ym} is in the protected holdout (>= {_holdout.LOCKED_FROM}): "
+                               "it loads only from data/holdout/YYYY-MM/bts by an unlocked holdout stage")
+        part = pd.read_parquet(Path(holdout_dir) / f"{ym}.parquet")
+        _holdout.refuse_rows_outside(part, ym)
+        frames.append(part)
     df = pd.concat(frames, ignore_index=True)
     for c in ("Reporting_Airline", "Marketing_Airline_Network", "Origin", "Dest"):
         df[c] = df[c].astype(str)

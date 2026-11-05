@@ -104,8 +104,10 @@ def eastern_to_utc_minutes(days: np.ndarray) -> np.ndarray:
 # Data
 # =============================================================================
 
-def load() -> tuple[pd.DataFrame, dict]:
-    df = bt.load_months("2024-01", "2025-08" if QUICK else "2026-08").reset_index(drop=True)
+def load(end: str = None, holdout_dir=None) -> tuple[pd.DataFrame, dict]:
+    """Months 2024-01..`end` (default: 2026-08, the last non-holdout month). `end` and `holdout_dir` are set only
+    by the unlocked holdout stages of experiments_b5.py; the defaults are exactly the B5.1 behaviour."""
+    df = bt.load_months("2024-01", end or ("2025-08" if QUICK else "2026-08"), holdout_dir).reset_index(drop=True)
     airports = pd.Index(sorted(set(df["Origin"]) | set(df["Dest"])))
     airlines = pd.Index(sorted(df["Reporting_Airline"].unique()))
     yms = pd.Index(sorted(df["ym"].unique()))

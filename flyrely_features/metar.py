@@ -72,9 +72,11 @@ def from_aviationweather(records: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def load_raw(airports: pd.Index, metar_dir: Path = None) -> pd.DataFrame:
+def load_raw(airports: pd.Index, metar_dir: Path = None, extra_dirs=()) -> pd.DataFrame:
+    """Every CSV of the main folder plus those of `extra_dirs` (the unlocked holdout month's folder; files are
+    named `<IATA>_YYYY-MM.csv` there). The default is the main folder alone."""
     frames = []
-    for f in sorted((metar_dir or METAR_DIR).glob("*.csv")):
+    for f in sorted((metar_dir or METAR_DIR).glob("*.csv")) + [g for d in extra_dirs for g in sorted(Path(d).glob("*.csv"))]:
         d = pd.read_csv(f, dtype=str)
         d["station"] = f.stem.rsplit("_", 1)[0]     # airport code from the file name (IEM ids differ: PANC, DJT)
         frames.append(d)
@@ -84,8 +86,8 @@ def load_raw(airports: pd.Index, metar_dir: Path = None) -> pd.DataFrame:
 class Metar:
     """Every report per airport, queryable at any cutoff time (minutes since 2024-01-01 00:00 UTC)."""
 
-    def __init__(self, airports: pd.Index, metar_dir: Path = None, raw: pd.DataFrame = None):
-        raw = raw if raw is not None else load_raw(airports, metar_dir)
+    def __init__(self, airports: pd.Index, metar_dir: Path = None, raw: pd.DataFrame = None, metar_dirs=()):
+        raw = raw if raw is not None else load_raw(airports, metar_dir, metar_dirs)
         self.ok = len(raw) > 0
         self.max_valid = None
         if not self.ok:
