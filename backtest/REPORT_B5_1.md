@@ -18,7 +18,7 @@ and was committed before any code change or evaluation. No amendments were neede
 (b) **METAR station IDs.** These now come from `data/ref/airports.csv`, through `flyrely_features/stations.py`.
 - Seven airports had empty files: ANC, HNL, OGG, KOA, LIH, SJU and PBI. They were fetched again for 2024-01..2026-08
   (21 requests, all returning data).
-- IEM serves PBI under its new ID, KDJT.
+- IEM serves PBI under its new station ID, DJT (ICAO code KDJT).
 - The empty files were moved to `data/metar/_stale_empty_b5/`.
 - The live mapping no longer uses `icaoId[-3:]`.
 
@@ -26,6 +26,8 @@ and was committed before any code change or evaluation. No amendments were neede
 
 (d) **Clock offsets.** Each airport's offset now comes from the tz database for each day, using the time zones in
 `models/airports_ref.csv`.
+  This also fixes Guam and Saipan, whose offsets were 24 hours wrong in B5. Their cutoffs had been a day late (about
+  2,900 flights), which was a tiny leak in B5's base features.
 
 (e) **Holdout guards.** `busiest_airports` ignores months from 2026-09 onward, and `experiments_b5.py` refuses to run
 if any METAR time falls on or after 2026-09-01.
@@ -84,9 +86,12 @@ Brier 0.17005, ECE 0.0453.
 1. **Validation, not holdout.** These are validation months; confirm on 2026-09 onward.
 2. **Default FAA periods.** Programs still use the documented defaults (GS 90 min, GDP 480 min), and production must
    use the same.
-3. **Clock offsets at local noon.** On the two clock-change days, flights in the few hours before the change still get
-   the post-change offset. The effect is small.
-4. **Combined titles.** A title naming two kinds of program (a handful of rows) is given only one kind, GS.
+3. **Clock offsets at local noon.** On the fall-back day, flights between midnight and 2am get a cutoff 60 minutes
+   late. No clock-change day falls in the evaluation months, so the effect here is nil.
+4. **Advisory wording edge cases.**
+   - A title naming two kinds of program is given only one kind, GS. All such titles are at Canadian airports.
+   - Partial cancellations such as "CANCELLED FOR ALL BUT DAL" end the whole ground stop (a handful of rows).
+   - Two misspelled Canadian titles are missed.
 5. **What the gains mean.** The FAA gain still partly reflects a "system already disrupted" signal. METAR's gain is
    small, so whether to depend on live aviationweather.gov data is a product decision.
 
