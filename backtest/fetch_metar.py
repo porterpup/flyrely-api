@@ -1,12 +1,15 @@
 """
 Fetch observed METARs (Iowa Environmental Mesonet ASOS archive, free, no key) for the busiest BTS airports.
 
-    python backtest/fetch_metar.py [top_n] [--airports ATL,ORD] [--end 2026-08-31] [--pause 2.0]
+    python backtest/fetch_metar.py [top_n] [--airports ATL,ANC] [--end 2026-08-31] [--pause 2.0]
 
 IEM guidance (asos.py?help): 1 s per-IP throttle (429 if exceeded, 503 if overloaded), 1,000 station-years per
 request. So: strictly sequential, one request per station-year, a pause between requests (default 2 s),
 exponential back-off on 429/503. Raw CSV is cached under data/metar/<IATA>_<year>.csv and never re-fetched
 (resumable: an interrupted run continues where it stopped; files are written atomically).
+
+Airports are BTS/IATA codes; the IEM station id comes from flyrely_features.stations (data/ref/airports.csv),
+e.g. ANC -> PANC, SJU -> TJSJ, PBI -> DJT. Files stay named by the BTS code.
 
 Holdout lock: dates after 2026-08-31 are refused unless FLYRELY_HOLDOUT_UNLOCK=1.
 """
@@ -24,6 +27,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import BTS_PARQUET as PARQUET  # noqa: E402
+sys.path.insert(0, str(ROOT))
+from flyrely_features.stations import iem_station, load_table  # noqa: E402
 
 OUT = ROOT / "data" / "metar"
 URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
@@ -31,6 +36,7 @@ FIELDS = ["vsby", "sknt", "gust", "skyc1", "skyc2", "skyc3", "skyc4", "skyl1", "
           "wxcodes", "p01i", "metar"]
 START_YEAR = 2024
 HOLDOUT_LAST_ALLOWED = "2026-08-31"
+HOLDOUT_FIRST_MONTH = "2026-09"
 UA = "flyrely-research/1.0 (sequential, cached; seanthomasbutton@gmail.com)"
 
 
@@ -45,8 +51,10 @@ def check_holdout(end: str) -> None:
 
 
 def busiest_airports(n: int) -> list[str]:
+    """The n busiest airports over 2025-01..2026-08. Months from 2026-09 on (the holdout) are never read."""
     counts = pd.Series(dtype="int64")
-    for p in sorted(PARQUET.glob("2025-*.parquet")) + sorted(PARQUET.glob("2026-*.parquet")):
+    files = sorted(PARQUET.glob("2025-*.parquet")) + sorted(PARQUET.glob("2026-*.parquet"))
+    for p in [f for f in files if f.stem < HOLDOUT_FIRST_MONTH]:
         df = pd.read_parquet(p, columns=["Origin", "Dest"])
         counts = counts.add(pd.concat([df["Origin"].astype(str), df["Dest"].astype(str)]).value_counts(), fill_value=0)
     return list(counts.sort_values(ascending=False).index[:n])
@@ -99,18 +107,21 @@ def main():
     check_holdout(a.end)
     airports = a.airports.split(",") if a.airports else busiest_airports(a.top_n)
     OUT.mkdir(parents=True, exist_ok=True)
+    table = load_table()
     todo = [(s, y, f, l) for s in airports for y, f, l in year_windows(a.end)
             if not (OUT / f"{s}_{y}.csv").exists()]
     print(f"{len(airports)} airports, {len(todo)} station-years to fetch", flush=True)
     with httpx.Client(headers={"User-Agent": UA}, follow_redirects=True) as client:
         for i, (s, y, f, l) in enumerate(todo, 1):
-            text = fetch_one(client, s, f, l)
+            text = fetch_one(client, iem_station(s, table), f, l)
             if not text.startswith("station,valid"):
                 raise SystemExit(f"unexpected response for {s} {y}: {text[:200]}")
             tmp = OUT / f"{s}_{y}.csv.part"
             tmp.write_text(text)
             tmp.rename(OUT / f"{s}_{y}.csv")
-            print(f"[{i}/{len(todo)}] {s} {y}: {text.count(chr(10)) - 1} rows", flush=True)
+            rows = text.count(chr(10)) - 1
+            print(f"[{i}/{len(todo)}] {s} {y}: {rows} rows" + ("  WARNING: EMPTY, check the station id" if rows <= 0 else ""),
+                  flush=True)
             time.sleep(a.pause)
 
 

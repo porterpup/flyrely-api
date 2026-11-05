@@ -113,8 +113,8 @@ A source is **adopted at a horizon** if and only if both hold on the evaluation 
 
 A source is **recommended overall** if it is adopted at one or more horizons; it is then used only at those horizons.
 Reported but not gating: AUC change, months improved out of 8, the A+B arm, and the size of the gain (a CI that
-excludes 0 on millions of flights can still be tiny; the report states the effect in plain language). If neither
-condition is met the verdict is "do not adopt". There is no re-tuning after seeing results: feature definitions and
+excludes 0 on millions of flights can still be tiny; the report states the effect in plain language). If either
+condition fails the verdict is "do not adopt". There is no re-tuning after seeing results: feature definitions and
 thresholds above are final, and any change is recorded as a new protocol.
 
 ## Amendment 2 (before any evaluation): default periods

@@ -55,20 +55,30 @@ def test_derive_flags():
 
 def test_metar_uses_only_reports_at_or_before_cutoff():
     raw = raw_metar([
-        {"station": "ATL", "valid": "2024-01-01 09:52", "vsby": "10", "skyc1": "CLR"},
-        {"station": "ATL", "valid": "2024-01-01 10:30", "vsby": "1", "skyc1": "OVC", "skyl1": "300"},   # after the cutoff
+        {"station": "ATL", "valid": "2024-01-01 09:48", "vsby": "10", "skyc1": "CLR"},
+        {"station": "ATL", "valid": "2024-01-01 10:20", "vsby": "1", "skyc1": "OVC", "skyl1": "300"},   # after the cutoff 10:00
     ])
     M = metar.Metar(AIRPORTS, raw=raw)
     A = flights(["2024-01-01 11:00"], ["2024-01-01 13:00"], o=0, d=1)
     f = metar.serve_row(M, A, 60)                                              # cutoff 10:00
     assert f["mt_o_vis_mi"] == 10 and f["mt_o_ceiling_ft"] == metar.NO_CEILING
-    assert f["mt_o_age_min"] == 8
-    f2 = metar.serve_row(M, flights(["2024-01-01 11:30"], ["2024-01-01 13:00"]), 60)   # cutoff 10:30 inclusive
+    assert f["mt_o_age_min"] == 12
+    f2 = metar.serve_row(M, flights(["2024-01-01 11:30"], ["2024-01-01 13:00"]), 60)   # cutoff 10:30: 10:20 is published exactly now (10 min lag, inclusive)
     assert f2["mt_o_vis_mi"] == 1 and f2["mt_o_ceiling_ft"] == 300
     # later reports never change an earlier answer
-    raw2 = pd.concat([raw, raw_metar([{"station": "ATL", "valid": "2024-01-01 10:45", "vsby": "0.5"}])])
+    raw2 = pd.concat([raw, raw_metar([{"station": "ATL", "valid": "2024-01-01 09:55", "vsby": "0.5"}])])
     f3 = metar.serve_row(metar.Metar(AIRPORTS, raw=raw2), A, 60)
     assert {k: v for k, v in f3.items() if v == v} == {k: v for k, v in f.items() if v == v}
+
+
+def test_metar_publication_lag_ten_minutes():
+    raw = raw_metar([{"station": "ATL", "valid": "2024-01-01 09:00", "vsby": "10", "skyc1": "CLR"},
+                     {"station": "ATL", "valid": "2024-01-01 09:55", "vsby": "2", "skyc1": "CLR"}])
+    M = metar.Metar(AIRPORTS, raw=raw)
+    at = lambda dep: metar.serve_row(M, flights([dep], [dep]), 60)
+    assert at("2024-01-01 11:04")["mt_o_vis_mi"] == 10      # cutoff 10:04 < 09:55 + 10 min: not yet published
+    assert at("2024-01-01 11:05")["mt_o_vis_mi"] == 2       # cutoff 10:05 = 09:55 + 10 min: usable
+    assert at("2024-01-01 11:05")["mt_o_age_min"] == 10     # age still counts from the observation time
 
 
 def test_metar_stale_or_uncovered_is_nan_not_calm():
@@ -223,3 +233,107 @@ def test_decision_rule_is_the_preregistered_one():
     assert not e.decide(ok, 0.020, 0.008)["adopt"]                   # ECE +0.012 is a material worsening
     assert not e.decide({"ci95": [-0.002, 0.0001]}, 0.005, 0.008)["adopt"]   # CI touches 0
     assert e.ECE_TOLERANCE == 0.005
+
+
+# ---------------------------------------------------------------- B5.1 fixes
+
+@pytest.mark.parametrize("title,expected", [
+    ("CDM GS CNX", ("GS", "cancel")),
+    ("CDM GROUND STOP CANCELLATION", ("GS", "cancel")),
+    ("CDM GROUND STOP CANCELLED", ("GS", "cancel")),
+    ("GROUND STOP CANCELED", ("GS", "cancel")),
+    ("GA GROUND STOP CANCELATION", ("GS", "cancel")),
+    ("SWA ONLY GROUND STOP CANCELLATION", ("GS", "cancel")),
+    ("CDM GROUND DELAY PROGRAM CANCELLED.", ("GDP", "cancel")),
+    ("CDM GROUND DELAY PROGRAM CNX", ("GDP", "cancel")),
+    ("CDM GROUND STOP", ("GS", "active")),
+    ("CDM PROPOSED GROUND DELAY PROGRAM", ("GDP", "proposed")),
+    ("ATL AIRPORT ARRIVAL DELAYS", None),
+])
+def test_classify_cancellation_wordings(title, expected):
+    assert ff.classify(title) == expected
+
+
+def test_cancellation_title_ends_the_program():
+    html = LIST_HTML.replace("CDM GS CNX", "CDM GROUND STOP CANCELLATION")
+    rows = ff.parse_list(html)
+    assert [(r["advn"], r["status"]) for r in rows] == [(149, "cancel"), (148, "active"), (110, "proposed")]
+
+
+def test_stations_mapping_not_prepend_k():
+    from flyrely_features import stations as st
+    table = pd.DataFrame([
+        {"ident": "KATL", "icao_code": "KATL", "iata_code": "ATL", "gps_code": "KATL"},
+        {"ident": "PANC", "icao_code": "PANC", "iata_code": "ANC", "gps_code": "PANC"},
+        {"ident": "TJSJ", "icao_code": "TJSJ", "iata_code": "SJU", "gps_code": "TJSJ"},
+        {"ident": "KPBI", "icao_code": "KDJT", "iata_code": "DJT", "gps_code": "KDJT"},   # listed under its new code
+    ])
+    assert st.iem_station("ATL", table) == "ATL"
+    assert [st.iem_station(c, table) for c in ("ANC", "SJU")] == ["PANC", "TJSJ"]
+    assert st.iem_station("PBI", table) == "DJT"                      # found by ident KPBI
+    assert st.icao_for("PBI", table) == "KDJT"
+    assert st.iem_station("XYZ", table) == "XYZ"                      # unknown: K-code rule, 3 letters
+    for icao, code in (("PHNL", "HNL"), ("PHKO", "KOA"), ("PHLI", "LIH"), ("PHOG", "OGG"), ("TJSJ", "SJU"),
+                       ("KDJT", "PBI"), ("KATL", "ATL")):
+        assert st.icao_to_code(icao) == code
+
+
+def test_live_mapping_keeps_four_letter_codes():
+    rec = [{"icaoId": i, "obsTime": 1704103200, "visib": "10"} for i in ("TJSJ", "KATL", "PANC", "KDJT")]
+    assert list(metar.from_aviationweather(rec)["station"]) == ["SJU", "ATL", "ANC", "PBI"]
+
+
+def test_load_raw_labels_rows_by_file_name(tmp_path):
+    (tmp_path / "ANC_2025.csv").write_text("station,valid,vsby\nPANC,2025-01-01 00:00,10\n")
+    raw = metar.load_raw(pd.Index(["ANC"]), tmp_path)
+    assert list(raw["station"]) == ["ANC"]
+    assert metar.Metar(pd.Index(["ANC"]), raw=raw).covered.all()
+
+
+def test_airport_offsets_without_dst():
+    import runup
+    ap = pd.Index(["ATL", "PHX", "HNL", "SJU", "LAX", "DEN"])
+    n = int((pd.Timestamp("2026-12-31") - DAY0).days) + 1
+    off = runup.airport_offsets(ap, n)
+    day = lambda s: int((pd.Timestamp(s) - DAY0).days)
+    col = {a: i for i, a in enumerate(ap)}
+    # winter 2024-01-15: ATL EST (-5). PHX MST (-7): -120 min vs ATL; HNL -10: -300; SJU AST -4: +60; LAX -180; DEN -120
+    assert [off[day("2024-01-15"), col[a]] for a in ap] == [0, -120, -300, 60, -180, -120]
+    # 2024-03-20, after the US change (ATL EDT -4): PHX stays MST -> -180; HNL -> -360; SJU -> 0; LAX PDT -> -180; DEN -> -120
+    assert [off[day("2024-03-20"), col[a]] for a in ap] == [0, -180, -360, 0, -180, -120]
+    # 2024-03-05 is in the same month but before the change: the old month-wide derivation could not tell
+    assert off[day("2024-03-05"), col["PHX"]] == -120 and off[day("2024-03-05"), col["SJU"]] == 60
+    # November change: summer values on 2024-11-02, winter values from 2024-11-04
+    assert off[day("2024-11-02"), col["PHX"]] == -180 and off[day("2024-11-04"), col["PHX"]] == -120
+    assert off[day("2024-11-04"), col["HNL"]] == -300 and off[day("2024-11-02"), col["HNL"]] == -360
+
+
+def test_airport_offsets_unknown_zone_is_nan():
+    import runup
+    off = runup.airport_offsets(pd.Index(["ATL", "ZZZ"]), 5, zones=["America/New_York", None])
+    assert np.isnan(off[:, 1]).all() and (off[:, 0] == 0).all()
+
+
+def test_zone_table_covers_non_dst_and_offshore_airports():
+    import runup
+    z = runup.airport_zones(pd.Index(["ATL", "ORD", "PHX", "HNL", "SJU", "ANC", "OGG", "PBI"]))
+    assert None not in z
+
+
+def test_busiest_airports_ignores_holdout_months(tmp_path, monkeypatch):
+    import fetch_metar
+    for ym, orig in (("2025-01", "ATL"), ("2026-08", "ATL"), ("2026-09", "ZZZ"), ("2026-10", "ZZZ")):
+        pd.DataFrame({"Origin": [orig] * 5, "Dest": ["ORD"] * 5}).to_parquet(tmp_path / f"{ym}.parquet")
+    monkeypatch.setattr(fetch_metar, "PARQUET", tmp_path)
+    assert "ZZZ" not in fetch_metar.busiest_airports(10)
+    assert set(fetch_metar.busiest_airports(10)) == {"ATL", "ORD"}
+
+
+def test_experiment_hard_fails_on_holdout_metar():
+    import experiments_b5 as e
+    ok = metar.Metar(AIRPORTS, raw=raw_metar([{"station": "ATL", "valid": "2026-08-31 23:53", "vsby": "10"}]))
+    e.check_metar_holdout(ok)
+    bad = metar.Metar(AIRPORTS, raw=raw_metar([{"station": "ATL", "valid": "2026-08-31 23:53", "vsby": "10"},
+                                                {"station": "XXX", "valid": "2026-09-01 00:00", "vsby": "10"}]))
+    with pytest.raises(RuntimeError):
+        e.check_metar_holdout(bad)         # also catches an airport that is not modelled
