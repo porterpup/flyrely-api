@@ -61,3 +61,18 @@ def load() -> CopilotConfig:
         affiliate_partners_configured=affiliate_partners_configured(),
         schedule_as_of=schedule_as_of(),
     )
+
+
+FLAG_WATCHER = "FLYRELY_COPILOT_WATCHER"
+
+
+def watcher_enabled() -> bool:
+    """The in-process watcher needs the master flag, push, and an explicit FLYRELY_COPILOT_WATCHER=1."""
+    return push_enabled() and os.getenv(FLAG_WATCHER) == "1"
+
+
+def watch_interval_s() -> float:
+    try:
+        return max(30.0, float(os.getenv("FLYRELY_COPILOT_WATCH_INTERVAL_S") or 900))
+    except ValueError:
+        return 900.0

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Copilot push watcher (docs/PLAN_DISRUPTION_COPILOT.md S-A8). NOT yet wired into install_services.py:
+         fill the __PLACEHOLDERS__ by hand (same values as the consumer plist) and copy to
+         ~/Library/LaunchAgents/com.flyrely.copilot-watcher.plist. The env file must set
+         FLYRELY_FEATURE_DISRUPTION_COPILOT=1, FLYRELY_COPILOT_PUSH=1, FLYRELY_COPILOT_WATCHER=1,
+         the three FLYRELY_COPILOT_VAPID_* variables and DATABASE_URL (the same database the API uses). -->
+    <key>Label</key>
+    <string>com.flyrely.copilot-watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>copilot.watcher</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FLYRELY_ENV_FILE</key>
+        <string>__ENV_FILE__</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Restart after a crash (non-zero exit) but not after a clean exit: the watcher exits 0 when its flags
+         are off or VAPID is missing, so a misconfiguration does not respawn forever. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/copilot-watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/copilot-watcher.log</string>
+</dict>
+</plist>
