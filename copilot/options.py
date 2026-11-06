@@ -110,24 +110,29 @@ def compose(
     flight_day = dep.date()
     warnings: list[str] = []
 
-    # airline = ticketing (marketing) airline of the user's flight
+    # airline = the ticketing (marketing) carrier the user BOOKED with. Contact details (phone, manage-booking URL) are
+    # always that carrier's, even when a regional partner operates the flight; operating_airline_name on alternatives
+    # is informational only.
     code = (f.airline or "").strip().upper() or (f.flight_number.strip().upper()[:2] if f.flight_number[:2].isalpha() else "")
     airline_info = airlines.lookup(code)
     notice = None
     if airline_info is None:
         entry = airlines.get_entry(code)
-        if entry and (entry.get("note") or entry.get("status_url")):
-            notice = AirlineNotice(code=code, name=entry.get("name") or code, note=entry.get("note"),
+        if entry and (entry.get("user_note") or entry.get("status_url")):
+            notice = AirlineNotice(code=code, name=entry.get("name") or code, note=entry.get("user_note"),
                                    status_url=entry.get("status_url"))
         else:
             warnings.append("unknown_airline")
     own = _flight_number(code or None, f.flight_number)
 
     ctx = context.location(req.home_airport, origin.iata)
-    refund = RefundRights(applies=bool(origin.state or dest.state),
-                          jurisdiction=None, content_key=None)
+    # airports_ref is US-only: an empty `state` means a territory (SJU, GUM, ...), which counts as international here.
+    international = not (origin.state and dest.state)
+    refund = RefundRights(applies=bool(origin.state or dest.state), jurisdiction=None, content_key=None,
+                          international=international, eu_possible=None)
     if refund.applies:
-        refund = RefundRights(applies=True, jurisdiction="US_DOT", content_key="us_dot_part260_v1")
+        refund = RefundRights(applies=True, jurisdiction="US_DOT", content_key="us_dot_part260_v2",
+                              international=international, eu_possible=None)
 
     # --- alternatives ---
     search = [_handoff(lk) for lk in links.flight_links(origin.iata, dest.iata, flight_day, env)]
@@ -160,6 +165,14 @@ def compose(
                 warnings.append("risk_unavailable")
         rows = sorted(zip(cands, scores),
                       key=lambda r: (r[1][0] if r[1] else 0.0, r[0][1]))
+        # one row per (carrier, flight number): the schedule can list the same flight at slightly different times;
+        # keep the one seen on the most days.
+        best: dict[tuple[str, str], int] = {}
+        for i, ((sf, _, _), _sc) in enumerate(rows):
+            k = (sf.marketing_airline, sf.flight_number)
+            if k not in best or sf.days_seen > rows[best[k]][0][0].days_seen:
+                best[k] = i
+        rows = [r for i, r in enumerate(rows) if best[(r[0][0].marketing_airline, r[0][0].flight_number)] == i]
         for (sf, dep_l, arr_l), sc in rows[:req.max_alternatives]:
             items.append(AlternativeItem(
                 marketing_airline=sf.marketing_airline, flight_number=sf.flight_number,
@@ -183,10 +196,10 @@ def compose(
     hotel = None
     needs_hotel = ctx.location == "away" and (req.state == "cancelled" or (req.state == "rebooked" and req.rebooked == "later"))
     if needs_hotel:
-        check_in = flight_day
         now_o = now().astimezone(ZoneInfo(origin.tz)).replace(tzinfo=None)
-        if now_o.date() == flight_day - timedelta(days=1) and now_o.time() > HOTEL_CHECKIN_CUTOFF:
-            check_in = now_o.date()
+        # "tonight" in the origin's local time: before 03:00 we are still on the previous night.
+        tonight = now_o.date() - timedelta(days=1) if now_o.time() < HOTEL_CHECKIN_CUTOFF else now_o.date()
+        check_in = max(tonight, flight_day)
         check_out = check_in + timedelta(days=1)
         hotel = Hotel(airport=origin.iata, check_in=check_in.isoformat(), check_out=check_out.isoformat(),
                       links=[_handoff(lk) for lk in links.hotel_links(origin.iata, origin.lat, origin.lon,

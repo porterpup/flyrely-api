@@ -1,6 +1,8 @@
 {
   "as_of": "2026-11-06",
   "fields": {
+    "user_note": "text safe to show to end users; the only note field that may reach an API response",
+    "internal_note": "developer-only context; never returned by the API",
     "manage_booking_url": "https URL of the manage-trip page on the airline's own site, or null if not verified",
     "phone": "customer-service number in E.164 form, or null if not verified",
     "phone_display": "same number, US display form",
@@ -176,7 +178,8 @@
       "sources": [
         "https://customersupport.spirit.com/en-us/category/article/KA-01219 (via search result; host did not resolve from this machine)"
       ],
-      "note": "Spirit's support page says an orderly wind-down began 2026-05-02, all flights cancelled, and no customer call center or email remains. Refund questions go to a third-party claims agent. No phone is published; do not show one.",
+      "user_note": "Spirit Airlines has stopped flying and no longer runs a customer call center. Refund questions are handled by a third-party claims agent; see Spirit's support page.",
+      "internal_note": "Spirit's support page says an orderly wind-down began 2026-05-02, all flights cancelled, and no customer call center or email remains. Refund questions go to a third-party claims agent. No phone is published; do not show one. DEVELOPER ONLY, never send to clients.",
       "verification": "unknown",
       "other_channels": {},
       "status_url": "https://customersupport.spirit.com/en-us/category/article/KA-01219"

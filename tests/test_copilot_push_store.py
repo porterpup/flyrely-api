@@ -152,3 +152,70 @@ def test_postgres_round_trip():
                     destination="LAX", departure=datetime(2026, 11, 15, 14, 30), now=NOW)
     assert s.claim(w.watch_id, push_store.KIND_HEADS_UP, NOW) and not s.claim(w.watch_id, push_store.KIND_HEADS_UP, NOW)
     assert s.unsubscribe(EP) >= 1
+
+
+# ---- review fixes: validation, global cap, rate limit
+def test_subscribe_rejects_unknown_airport(client):
+    f = {**FLIGHT, "origin": "XXX"}
+    r = client.post("/copilot/push/subscribe", json=body(flight=f))
+    assert r.status_code == 422 and r.json()["detail"]["reason"] == "unknown_airport"
+    f = {**FLIGHT, "destination": "ZZZ"}
+    assert client.post("/copilot/push/subscribe", json=body(flight=f)).status_code == 422
+
+
+@pytest.mark.parametrize("patch", [
+    {"airline": "DELTA"}, {"airline": "D"}, {"flight_number": "DL12345"}, {"flight_number": "x" * 40},
+    {"origin": "jfkk"}, {"origin": "J1K"}, {"destination": "LA"}, {"departure_time": "2026-11-15T14:30:00" + "0" * 50},
+])
+def test_subscribe_flightref_bounds(client, patch):
+    assert client.post("/copilot/push/subscribe", json=body(flight={**FLIGHT, **patch})).status_code == 422
+
+
+def test_subscribe_client_flight_id_max_length(client):
+    assert client.post("/copilot/push/subscribe", json=body(cfid="a" * 200)).status_code == 422
+
+
+def test_flightref_accepts_valid_forms(client):
+    for fn in ("DL1234", "1234", "DL1234A", "DL 12"):
+        assert client.post("/copilot/push/subscribe",
+                           json=body(flight={**FLIGHT, "flight_number": fn})).status_code == 201
+
+
+def test_global_watch_cap_returns_429_and_alerts_once(client, store, monkeypatch):
+    import alerts
+    sent = []
+    monkeypatch.setattr(alerts, "send_alert", lambda subject, body, env=None: sent.append(subject) or [])
+    monkeypatch.setenv("FLYRELY_COPILOT_MAX_WATCHES", "2")
+    for i in range(2):
+        assert client.post("/copilot/push/subscribe", json=body(endpoint=EP + str(i))).status_code == 201
+    for i in range(2, 5):
+        assert client.post("/copilot/push/subscribe", json=body(endpoint=EP + str(i))).status_code == 429
+    assert len(sent) == 1 and store.count() == 2
+    # an idempotent re-subscribe of an existing watch is still allowed at the cap
+    assert client.post("/copilot/push/subscribe", json=body(endpoint=EP + "0")).status_code == 201
+
+
+def test_rate_limit_per_ip_and_xff_only_from_trusted_proxy(client, monkeypatch):
+    from copilot.ratelimit import RateLimiter
+    monkeypatch.setenv("FLYRELY_COPILOT_RATE_PER_MIN", "60")
+    monkeypatch.setenv("FLYRELY_COPILOT_RATE_BURST", "3")
+    client.app.state.copilot_limiter = RateLimiter(clock=lambda: 0.0)
+    codes = [client.get("/copilot/config").status_code for _ in range(5)]
+    assert codes == [200, 200, 200, 429, 429]
+    # X-Forwarded-For is ignored by default: a spoofed header does not get a fresh bucket
+    assert client.get("/copilot/config", headers={"X-Forwarded-For": "9.9.9.9"}).status_code == 429
+    # trusted proxy (the test client's peer) -> the forwarded client gets its own bucket
+    monkeypatch.setenv("FLYRELY_COPILOT_TRUSTED_PROXIES", "testclient")
+    assert client.get("/copilot/config", headers={"X-Forwarded-For": "9.9.9.9"}).status_code == 200
+
+
+def test_rate_limit_refills_over_time(client, monkeypatch):
+    from copilot.ratelimit import RateLimiter
+    monkeypatch.setenv("FLYRELY_COPILOT_RATE_PER_MIN", "60")
+    monkeypatch.setenv("FLYRELY_COPILOT_RATE_BURST", "1")
+    t = [0.0]
+    client.app.state.copilot_limiter = RateLimiter(clock=lambda: t[0])
+    assert client.get("/copilot/config").status_code == 200
+    assert client.get("/copilot/config").status_code == 429
+    t[0] = 2.0
+    assert client.get("/copilot/config").status_code == 200
