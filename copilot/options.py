@@ -17,7 +17,7 @@ from fastapi import HTTPException
 from . import airlines, context, links
 from .schedule import BtsTypicalSchedule, ScheduleSource
 from .schemas import (
-    AlternativeItem, Alternatives, Disclosure, Handoff, Hotel, OptionsRequest, OptionsResponse, RefundRights, Ride,
+    AirlineNotice, AlternativeItem, Alternatives, Disclosure, Handoff, Hotel, OptionsRequest, OptionsResponse, RefundRights, Ride,
     RideLink,
 )
 
@@ -113,8 +113,14 @@ def compose(
     # airline = ticketing (marketing) airline of the user's flight
     code = (f.airline or "").strip().upper() or (f.flight_number.strip().upper()[:2] if f.flight_number[:2].isalpha() else "")
     airline_info = airlines.lookup(code)
+    notice = None
     if airline_info is None:
-        warnings.append("unknown_airline")
+        entry = airlines.get_entry(code)
+        if entry and (entry.get("note") or entry.get("status_url")):
+            notice = AirlineNotice(code=code, name=entry.get("name") or code, note=entry.get("note"),
+                                   status_url=entry.get("status_url"))
+        else:
+            warnings.append("unknown_airline")
     own = _flight_number(code or None, f.flight_number)
 
     ctx = context.location(req.home_airport, origin.iata)
@@ -198,6 +204,6 @@ def compose(
 
     all_links = search + (hotel.links if hotel else []) + ride.links
     return OptionsResponse(
-        state=req.state, context=ctx, airline=airline_info, refund_rights=refund, alternatives=alternatives,
+        state=req.state, context=ctx, airline=airline_info, airline_notice=notice, refund_rights=refund, alternatives=alternatives,
         hotel=hotel, ride=ride, disclosure=Disclosure(required=any(h.is_affiliate for h in all_links)),
         warnings=warnings)

@@ -254,3 +254,14 @@ def test_performance_40_flights(make_client, tmp_path):
     j = c.post("/copilot/options", json=body(max_alternatives=15)).json()
     assert len(j["alternatives"]["items"]) == 15
     assert time.perf_counter() - t < 0.3
+
+
+def test_airline_passthrough_and_spirit_notice(make_client):
+    c = make_client()
+    j = c.post("/copilot/options", json=body()).json()
+    assert "verification" in j["airline"] and "other_channels" in j["airline"] and j["airline_notice"] is None
+    b = body()
+    b["flight"].update(airline="NK", flight_number="NK100")
+    j = c.post("/copilot/options", json=b).json()
+    assert j["airline"] is None and j["airline_notice"]["status_url"].startswith("https://")
+    assert j["airline_notice"]["note"] and "unknown_airline" not in j["warnings"]
