@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backtest"))
 import a7_l0  # noqa: E402
-from flyrely_features.inbound import Pairings, inbound_features, plurality_prev_weeks, true_inbound  # noqa: E402
+from inbound import Pairings, inbound_features, plurality_prev_weeks, true_inbound  # noqa: E402
 from flyrely_features.rotation import Rotation  # noqa: E402
 
 NAN = np.nan
@@ -74,15 +74,14 @@ def test_no_inbound_gives_nan():
     assert all(np.isnan(v[0]) for v in f.values())
 
 
-def weekly_rotation(n_weeks=3, swap_week=None):
+def weekly_rotation(n_weeks=3):
     """Flight 10 (AAA->BBB) then flight 11 (BBB->CCC) every day at the same times; one tail per day."""
     rows = dict(tail_id=[], s_dep=[], s_arr=[], dep_delay=[], elapsed=[], o_id=[], d_id=[], fn_id=[], day=[])
     for d in range(7 * n_weeks):
         for fn, o, dd, s in ((10, 0, 1, 600.0), (11, 1, 2, 900.0)):
-            f = fn if not (swap_week is not None and d // 7 == swap_week and fn == 11) else 11
             rows["tail_id"].append(d); rows["s_dep"].append(d * 1440 + s); rows["s_arr"].append(d * 1440 + s + 120)
             rows["dep_delay"].append(0.0); rows["elapsed"].append(120.0); rows["o_id"].append(o); rows["d_id"].append(dd)
-            rows["fn_id"].append(f); rows["day"].append(d)
+            rows["fn_id"].append(fn); rows["day"].append(d)
     return sched(**rows)
 
 
@@ -95,7 +94,7 @@ def test_pairing_table_and_prior_use_only_earlier_days():
     # with data only up to day 13 the d-7 pairing (flight 10) predicts the inbound for day 14
     r = P.prior_inbound(day14, last_day=np.array([13]))
     assert A["fn_id"][r[0]] == 10 and A["day"][r[0]] == 14
-    # cutoff day 7: nothing allowed after day 6, d-7 is day 0 -> still fine; but a cutoff day before d-7 gives nothing
+    # if the data allowed ends before day 7 (the d-7 day for day 14), there is nothing to predict from
     none = P.prior_inbound(day14, last_day=np.array([5]), lags=(7,))
     assert none[0] == -1
 

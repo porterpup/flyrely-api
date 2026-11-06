@@ -24,7 +24,7 @@ sys.path.insert(0, str(HERE.parent))
 import backtest as bt  # noqa: E402
 import runup  # noqa: E402
 from flyrely_features._common import HORIZONS, cutoff_day  # noqa: E402
-from flyrely_features.inbound import IN_COLS, Pairings, inbound_features, plurality_prev_weeks  # noqa: E402
+from inbound import IN_COLS, Pairings, inbound_features, plurality_prev_weeks  # noqa: E402
 
 QUICK = runup.QUICK
 CACHE = HERE.parent / "data" / "cache" / ("a7_l0_quick" if QUICK else "a7_l0")

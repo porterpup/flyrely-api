@@ -1,7 +1,7 @@
 # Report A7 + L0: value of knowing the inbound aircraft, and stability of rotations
 
-Protocol: `PROTOCOL_A7_L0.md` (committed before any evaluation). Code: `backtest/a7_l0.py`, `flyrely_features/inbound.py`.
-Results: `backtest/results/a7_l0.json`. Evaluation: 2026-01..08 (validation months, 4.87M flights), fit 2025-01..06,
+Protocol: `PROTOCOL_A7_L0.md` (committed before any evaluation). Code: `backtest/a7_l0.py`, `backtest/inbound.py`.
+Results: `backtest/results/a7_l0.json`. Evaluation: 2026-01..08 (validation months, 5,227,724 flights, 5,108,811 flown; 4.87M of them have a pairing, used in L0), fit 2025-01..06,
 calibration 2025-07..12. Nothing from 2026-09 on was loaded. Offline, $0.
 
 ## Verdict (plain)
@@ -65,8 +65,11 @@ the same degraded data (trained on perfect linkage).
 
 ECE stays below 0.01 in all serve-trained arms (N is 0.0017 / 0.0058), so calibration is not a concern.
 
-Regional (contract-operated) flights are 32.6% of the eval flights; leaving them unlinked costs a lot (mainline-only at
-100% = 67.4% linked: gain 0.0220 vs 0.0291 at full linkage; mainline at 29% yields only 0.0062).
+Regional (contract-operated) flights are 32.6% of the eval flights. Compared with random linkage at the SAME overall
+linked share, the regional-unlinked pattern costs nothing extra: 19.5% linked gives 0.0062 (T-3h) versus about 0.0057
+for random linkage at 19.5% (between L0.25 = 0.0073 and 0 = 0, roughly linear), and 67.4% linked gives 0.0220 versus
+0.0212 for random 70%. The lower gain comes only from the lower linked share; being mainline-only is no worse (if
+anything marginally better) than random.
 
 ### Gap to perfect (rule 3), Brier(level) - Brier(P+), serve-trained
 
@@ -129,16 +132,23 @@ hubs). They can serve as a fallback prior (and the PR arm shows they still carry
 
 ## Caveats (read before using the numbers)
 
-1. **BTS tails are recorded after the fact.** Tail swaps and late aircraft changes mean the tail known at T-3h or
-   T-1h can differ from the one that flew. All "perfect linkage" results are therefore **upper bounds**; the true gain of a
-   linkage service with some swap error is smaller, by an amount this offline study cannot measure (L1 will). The
-   PR arm, which uses no tail, is the one result free of this assumption.
-2. The existing B5.1 base already contained these tail features; the N arm is new, so "gain" here is the value of
-   linkage, not an addition to the B5.1 verdicts.
+1. **BTS tails are recorded after the fact, and every earlier backtest assumed them.** RUNUP, B1, B5, B5.1 and the
+   frozen holdout models all used hindsight tails (the `rot_*` rotation features) at T-3h and T-1h. The perfect-linkage
+   arm P here reproduces the B5.1 base exactly (Brier 0.12281 / 0.10642, AUC 0.8222 / 0.8556), so those earlier
+   numbers are the perfect-linkage level, not a tail-free level. The no-linkage level is Brier 0.152 at T-3h and 0.149
+   at T-1h (AUC 0.748 / 0.759). Tail swaps and late aircraft changes mean the tail known at T-3h or T-1h can differ from
+   the one that flew, so all "perfect linkage" gains are **upper bounds**; a real service with swap error sits between
+   no linkage and perfect, by an amount this offline study cannot measure (L1 will). The swap bias runs one way:
+   swaps happen when the planned inbound is late or broken, so the hindsight tail looks most informative exactly on the
+   delayed flights that matter. The PR arm, which uses no tail, is the one result free of this assumption.
+2. The B5.1 base already contained these tail features; the N arm is new, so "gain" here is the value of linkage, not
+   an addition to the B5.1 verdicts. B5.1's source verdicts (FAA, METAR on top of the base) are unaffected in sign, but
+   its absolute Brier and AUC levels should be read as perfect-linkage levels.
 3. BTS parquet has no actual arrival times; "inbound has arrived" is an ETA estimate (actual departure + scheduled block).
    True arrival data (SWIM) should add a little more, and diversions are not modelled.
 4. Random linkage (independent per flight) is optimistic about how well SFDPS fill spreads; real fill is correlated with
-   carrier and airport (the regional-unlinked pattern shows the cost: 0.0062 vs 0.0086 at the same mainline rate).
+   carrier and airport (the regional-unlinked arms were no worse than random linkage at the same overall linked share, so clustering by carrier
+did not hurt here, but clustering by airport or by time was not tested).
 5. Validation months only; 2026-09 holdout untouched. The levels are single-seed (seed 42); the CIs cover day-to-day
    sampling, not model-fit variance.
 

@@ -96,5 +96,5 @@ Everything is reported whatever it shows. No re-tuning after seeing results; any
 
 ## Outputs
 
-`backtest/a7_l0.py`, `flyrely_features/inbound.py`, `tests/test_a7_l0.py`, `backtest/results/a7_l0.json`,
+`backtest/a7_l0.py`, `backtest/inbound.py`, `tests/test_a7_l0.py`, `backtest/results/a7_l0.json`,
 `backtest/REPORT_A7_L0.md`. Cache: `data/cache/a7_l0/` only.

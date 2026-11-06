@@ -7,8 +7,8 @@ state of a given inbound leg using only times at or before the cutoff.
 
 import numpy as np
 
-from ._common import MIN_TURN, Counter  # noqa: F401
-from .rotation import Rotation
+from flyrely_features._common import MIN_TURN
+from flyrely_features.rotation import Rotation
 
 MAX_GAP = 18 * 60          # an inbound must have been scheduled to leave within 18 h before this flight
 DAY_STRIDE = 5000          # larger than the number of days in the data

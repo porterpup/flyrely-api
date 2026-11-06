@@ -270,6 +270,9 @@ confirmation uses one new month once, following the same pattern as this protoco
    2026-10 (one commit; section 6).
 
 ## 9. Outputs
+
+> **Reporting note (added after A7, PR #20; not part of the frozen code):** the T-3h and T-1h models use hindsight BTS tails for rotation features, so the holdout Brier/AUC are perfect-linkage levels (about 0.123 / 0.106 on validation; the tail-free level is 0.152 / 0.149). Report them with this caveat; see `REPORT_A7_L0.md`.
+
 - `backtest/results/h1_models_manifest.json`, `backtest/results/h1_airports.json` (stage 1, committed before the
   download).
 - `backtest/results/h1_b5_1_2026-09.json`, `backtest/REPORT_B5_1_HOLDOUT.md` (stage 3).
