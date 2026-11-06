@@ -50,12 +50,12 @@ sys.path.insert(0, str(ROOT))
 
 from flyrely_features import booking, recent  # noqa: E402
 from paths import BTS_PARQUET  # noqa: E402
+from holdout import LOCKED_FROM, LOCKED_FROM_TS as FORBIDDEN_FROM  # noqa: E402  the one holdout policy
 
 CACHE = ROOT / "data" / "cache" / "v3"
 RESULTS = HERE / "results"
 SEED = 42
 FIRST, LAST = "2024-01", "2026-08"
-FORBIDDEN_FROM = pd.Timestamp("2026-09-01")
 DAY0 = pd.Timestamp("2024-01-01")
 FIT_END = "2025-09"  # HGB weights on 2025-01..09; isotonic on 2025-10..12
 VAL_MONTHS = [f"2026-{m:02d}" for m in range(1, 9)]
@@ -77,7 +77,7 @@ def assert_no_holdout(months=None, frame=None):
     if frame is not None:
         if "FlightDate" in frame and frame["FlightDate"].max() >= FORBIDDEN_FROM:
             raise RuntimeError("protected holdout data (>= 2026-09) present in frame")
-        if "ym" in frame and frame["ym"].max() >= "2026-09":
+        if "ym" in frame and frame["ym"].max() >= LOCKED_FROM:
             raise RuntimeError("protected holdout data (>= 2026-09) present in frame")
 
 

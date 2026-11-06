@@ -1,0 +1,7 @@
+# Everything the SWIM consumer, health check and retention job need (no ML/pandas stack).
+# For the spare Mac / a Linux VM. solace-pubsubplus 1.11.0 has wheels for macOS 11+ (Intel and
+# Apple Silicon, universal2) and Linux x86_64/aarch64. macOS 10.15 needs requirements-swim-macos10.txt.
+python-dotenv>=1.0.0
+solace-pubsubplus==1.11.0
+certifi
+zstandard==0.25.0

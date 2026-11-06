@@ -7,14 +7,13 @@ other than a small allow-list of categorical ones.
 """
 import argparse
 import collections
-import glob
 import json
 import re
 import statistics
-import zlib
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from pathlib import Path
+
+from swim import archive
 
 REG_NAMES = {"aircraftregistration", "registration", "tailnumber", "registrationnumber"}
 ICAO_NAMES = {"aircraftaddress", "modescode", "icaoaddress", "aircraftaddresshex", "modeaddress"}
@@ -148,35 +147,11 @@ def is_flight(props: dict, root) -> bool:
         "status" not in root_tag(root).lower()
 
 
-def read_lines(path):
-    """Yield text lines from a (possibly multi-member, possibly truncated) gzip file.
-    A damaged or cut-off final chunk is skipped instead of raising."""
-    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    buf = b""
-    with open(path, "rb") as fh:
-        while True:
-            chunk = fh.read(1 << 20)
-            if not chunk:
-                break
-            while chunk:
-                try:
-                    out = d.decompress(chunk)
-                except zlib.error:
-                    return  # damaged data: stop reading this file
-                buf += out
-                *lines, buf = buf.split(b"\n")
-                for ln in lines:
-                    yield ln.decode("utf-8", "replace")
-                if d.eof:  # member finished; start the next one
-                    chunk = d.unused_data
-                    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                else:
-                    chunk = b""
-    # a partial trailing line (truncated chunk) is dropped on purpose
+read_lines = archive.read_lines  # .jsonl.gz and .jsonl.zst; a torn final chunk is skipped
 
 
 def iter_records(directory: Path):
-    for f in sorted(glob.glob(str(directory / "*" / "*.jsonl.gz"))):
+    for f in archive.archive_files(directory):
         for line in read_lines(f):
             try:
                 yield json.loads(line)
@@ -246,10 +221,10 @@ def main(argv=None):
         counts = list(per_min.values())
         print(f"minutes spanned: {len(counts)}  messages/min mean={statistics.mean(counts):.0f} "
               f"median={statistics.median(counts):.0f} max={max(counts)}")
-    size = sum(Path(f).stat().st_size for f in glob.glob(str(d / "*" / "*.jsonl.gz")))
+    size = sum(f.stat().st_size for f in archive.archive_files(d))
     if per_min:
         gb_day = size / len(per_min) * 1440 / 1e9
-        print(f"archive size: {size / 1e6:.1f} MB gz; projected {gb_day:.2f} GB/day at this rate")
+        print(f"archive size: {size / 1e6:.1f} MB compressed; projected {gb_day:.2f} GB/day at this rate")
     print("\nservice breakdown:", dict(services))
     print("root elements:", dict(roots.most_common(10)))
     for k, c in sorted(prop_counts.items()):

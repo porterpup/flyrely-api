@@ -80,4 +80,5 @@ def test_fetch_weather_refuses_holdout_end(monkeypatch):
         assert "holdout" in str(e.value) or "invalid" in str(e.value)
     fetch_weather.check_holdout("2026-08-31")           # last allowed day passes
     monkeypatch.setenv("FLYRELY_HOLDOUT_UNLOCK", "1")
-    fetch_weather.check_holdout("2026-09-30")           # explicit unlock passes
+    with pytest.raises(SystemExit):                     # the old unlock value is refused (tests/test_holdout_guard.py)
+        fetch_weather.check_holdout("2026-09-30")

@@ -5,6 +5,7 @@ Advisories Database (https://www.fly.faa.gov/adv/advADB, no key).
     python backtest/fetch_faa_adv.py lists   [--start 2024-01-01] [--end 2026-08-31] [--pause 1.5]
     python backtest/fetch_faa_adv.py details [--airports-top 100] [--pause 1.5]
     python backtest/fetch_faa_adv.py build                      # -> data/faa_adv/programs_v2.parquet
+    FLYRELY_HOLDOUT_UNLOCK=2026-09 python backtest/fetch_faa_adv.py lists --holdout 2026-09   # and: build --holdout
 
 Phase 1 (`lists`): one request per day, listing every GS/GDP advisory of that day (number, control element,
 title, send time in UTC). Cached as data/faa_adv/list/<date>.html.
@@ -15,12 +16,13 @@ Phase 3 (`build`): parse into data/faa_adv/programs_v2.parquet (one row per advi
 cancellation wording (CNX, CANCELLED, CANCELLATION, ...) as a cancel; programs.parquet (B5) is kept untouched.
 
 Polite: strictly sequential, a pause between requests, back-off on errors, everything cached, resumable.
-Holdout lock: dates after 2026-08-31 are refused unless FLYRELY_HOLDOUT_UNLOCK=1.
+Holdout lock (backtest/holdout.py): dates after 2026-08-31 are always refused in the normal form. `lists|build
+--holdout YYYY-MM` (with FLYRELY_HOLDOUT_UNLOCK=YYYY-MM) uses the month plus one day and the folder
+data/holdout/YYYY-MM/faa_adv/ only (list/, programs.parquet). `details` refuses --holdout.
 """
 
 import argparse
 import html
-import os
 import re
 import sys
 import time
@@ -32,20 +34,24 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import holdout  # noqa: E402
 OUT = ROOT / "data" / "faa_adv"
 BASE = "http://www.fly.faa.gov/adv"
 UA = "flyrely-research/1.0 (sequential, cached; seanthomasbutton@gmail.com)"
-HOLDOUT_LAST_ALLOWED = "2026-08-31"
+LAST_ALLOWED = str(holdout.LAST_ALLOWED_DATE)     # 2026-08-31
+HOLDOUT_PROGRAMS_FILE = "programs.parquet"        # inside data/holdout/YYYY-MM/faa_adv/
 PROGRAMS_FILE = "programs_v2.parquet"   # B5.1; B5 used programs.parquet (kept)
 LIST_PARAMS = {"whichAdvisories": "ATCSCC", "advisoryCategory": "NotAll", "gStop": "true", "_gStop": "on",
                "gDelay": "true", "_gDelay": "on", "_airflow": "on", "_ctop": "on", "_route": "on", "_other": "on"}
 
 
-def check_holdout(end: str) -> None:
-    if date.fromisoformat(end) > date.fromisoformat(HOLDOUT_LAST_ALLOWED) and \
-            os.environ.get("FLYRELY_HOLDOUT_UNLOCK") != "1":
-        raise SystemExit(f"refusing {end}: dates after {HOLDOUT_LAST_ALLOWED} are the untouched holdout "
-                         "(set FLYRELY_HOLDOUT_UNLOCK=1 to override)")
+def check_holdout(end: str, holdout_month: str = None) -> None:
+    holdout.check_end_date(end, holdout_month)
+
+
+def holdout_out(holdout_month: str = None) -> Path:
+    """Data folder: the main one, or the holdout month's own (never a subfolder of the main one)."""
+    return holdout.holdout_dir(holdout_month) / "faa_adv" if holdout_month else OUT
 
 
 # =============================================================================
@@ -153,26 +159,51 @@ def get(client: httpx.Client, url: str, params=None, tries: int = 6) -> str:
     raise SystemExit(f"giving up on {url}")
 
 
+def _holdout_args(a) -> str | None:
+    """Validate --holdout for lists/build; returns the month (and fixes start/end) or None."""
+    if not a.holdout:
+        return None
+    if a.cmd == "details":
+        raise SystemExit("details does not accept --holdout: detail pages are not used for the holdout "
+                         "(default program periods are the protocol)")
+    if a.start != "2024-01-01" or a.end != LAST_ALLOWED:
+        raise SystemExit("--holdout takes no --start/--end: the dates are the month plus one day")
+    month = holdout.require_unlock(a.holdout)
+    first, last = holdout.input_window(month)
+    a.start, a.end = str(first), str(last)
+    return month
+
+
 def cmd_lists(a):
-    check_holdout(a.end)
-    (OUT / "list").mkdir(parents=True, exist_ok=True)
+    month = _holdout_args(a)
+    check_holdout(a.end, month)
+    out = holdout_out(month)
+    (out / "list").mkdir(parents=True, exist_ok=True)
     days = [d.date() for d in pd.date_range(a.start, a.end)]
-    todo = [d for d in days if not (OUT / "list" / f"{d}.html").exists()]
+    todo = [d for d in days if not (out / "list" / f"{d}.html").exists()]
     print(f"{len(todo)} of {len(days)} daily lists to fetch", flush=True)
     with httpx.Client(headers={"User-Agent": UA}, follow_redirects=True) as c:
         for i, d in enumerate(todo, 1):
             page = get(c, f"{BASE}/adv_list", dict(LIST_PARAMS, date=str(d)))
-            tmp = OUT / "list" / f"{d}.html.part"
+            tmp = out / "list" / f"{d}.html.part"
             tmp.write_text(page)
-            tmp.rename(OUT / "list" / f"{d}.html")
+            tmp.rename(out / "list" / f"{d}.html")
             if i % 25 == 0 or i == len(todo):
                 print(f"[{i}/{len(todo)}] {d}", flush=True)
             time.sleep(a.pause)
 
 
-def list_frame() -> pd.DataFrame:
+def list_frame(holdout_month: str = None) -> pd.DataFrame:
+    """Every GS/GDP advisory on the cached list pages. The main folder never yields holdout dates (a stray
+    2026-09+ page there is ignored); the holdout month's own folder yields its month plus one day only."""
     rows = []
-    for p in sorted((OUT / "list").glob("*.html")):
+    folder = holdout_out(holdout_month) / "list"
+    if holdout_month:
+        first, last = holdout.input_window(holdout_month)
+        pages = [p for p in sorted(folder.glob("*.html")) if str(first) <= p.stem <= str(last)]
+    else:
+        pages = [p for p in sorted(folder.glob("*.html")) if not holdout.is_locked_date(p.stem)]
+    for p in pages:
         for r in parse_list(p.read_text()):
             r["list_date"] = p.stem
             rows.append(r)
@@ -185,6 +216,7 @@ def top_airports(n: int) -> set:
 
 
 def cmd_details(a):
+    _holdout_args(a)
     lst = list_frame()
     keep = lst[(lst["status"] != "cancel") & lst["element"].isin(top_airports(a.airports_top))]
     keep = keep.drop_duplicates(["adv_date", "advn"])
@@ -207,20 +239,25 @@ def cmd_details(a):
 
 
 def cmd_build(a):
-    lst = list_frame()
+    month = _holdout_args(a)
+    lst = list_frame(month)
+    if month and lst.empty:
+        raise SystemExit(f"no list pages in {holdout_out(month) / 'list'}: run `lists --holdout {month}` first")
     ends = []
     for r in lst.itertuples():
         f = OUT / "detail" / f"{r.adv_date}_{r.advn}.txt"
-        d = parse_detail(f.read_text(), r.sent_utc.to_pydatetime()) if (a.use_details and f.exists()) else \
+        d = parse_detail(f.read_text(), r.sent_utc.to_pydatetime()) if (a.use_details and not month and f.exists()) else \
             {"period_start": pd.NaT, "period_end": pd.NaT}
         ends.append(d)
     out = pd.concat([lst.reset_index(drop=True), pd.DataFrame(ends)], axis=1)
     out["sent_utc"] = pd.to_datetime(out["sent_utc"], utc=True).dt.tz_localize(None)
     for c in ("period_start", "period_end"):
         out[c] = pd.to_datetime(out[c], utc=True).dt.tz_localize(None)
-    out.to_parquet(OUT / PROGRAMS_FILE)
+    target = holdout_out(month) / HOLDOUT_PROGRAMS_FILE if month else OUT / PROGRAMS_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(target)
     print(out.groupby(["kind", "status"]).size())
-    print("wrote", OUT / PROGRAMS_FILE, len(out))
+    print("wrote", target, len(out))
 
 
 def main():
@@ -229,10 +266,12 @@ def main():
     for name in ("lists", "details", "build"):
         s = sub.add_parser(name)
         s.add_argument("--start", default="2024-01-01")
-        s.add_argument("--end", default=HOLDOUT_LAST_ALLOWED)
+        s.add_argument("--end", default=LAST_ALLOWED)
         s.add_argument("--pause", type=float, default=1.5)
         s.add_argument("--airports-top", type=int, default=100)
         s.add_argument("--sample", type=int, default=0, help="details: fetch only N random active advisories")
+        s.add_argument("--holdout", metavar="YYYY-MM", help="lists/build only: use that protected month plus one "
+                       "day and data/holdout/YYYY-MM/faa_adv/ (needs FLYRELY_HOLDOUT_UNLOCK=YYYY-MM)")
         s.add_argument("--use-details", action="store_true", help="build: read periods from cached detail pages "
                        "(default: send time + documented default durations, for every advisory alike)")
     a = ap.parse_args()

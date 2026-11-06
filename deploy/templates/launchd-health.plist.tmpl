@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>swim.health</string>
+        <string>--sources</string>
+        <string>__SOURCES__</string>
+        <string>--min-free-gb</string>
+        <string>__MIN_FREE_GB__</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FLYRELY_ENV_FILE</key>
+        <string>__ENV_FILE__</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/swim-health.log</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/swim-health.log</string>
+__DAEMON_KEYS__</dict>
+</plist>
