@@ -1,5 +1,7 @@
 # Run-up backtest: results
 
+> **Caveat (added after A7, PR #20):** the T-3h and T-1h models in this report use rotation features built from BTS tail numbers, which are recorded after the fact (hindsight tails). Their Brier/AUC are perfect-linkage levels (T-3h 0.123, T-1h 0.106); without any tail linkage the same models score 0.152 and 0.149, and swaps make the hindsight tail most informative on delayed flights, so the bias is one-directional. See `REPORT_A7_L0.md`.
+
 Protocol: `PROTOCOL_RUNUP.md` (commit `4a5ae73`), code at `2a5b164`. Holdout
 2026-01 → 2026-08, 4.73M flights, scored once on 2026-10-29. Raw output:
 `results/runup.json`.

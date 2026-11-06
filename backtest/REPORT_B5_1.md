@@ -1,5 +1,7 @@
 # B5.1 results: B5 re-run with the review fixes
 
+> **Caveat (added after A7, PR #20):** the T-3h and T-1h models in this report use rotation features built from BTS tail numbers, which are recorded after the fact (hindsight tails). Their Brier/AUC are perfect-linkage levels (T-3h 0.123, T-1h 0.106); without any tail linkage the same models score 0.152 and 0.149, and swaps make the hindsight tail most informative on delayed flights, so the bias is one-directional. See `REPORT_A7_L0.md`.
+
 **Status:** `backtest/experiments_b5.py` ran as pre-registered in `PROTOCOL_B5_1.md`, which builds on `PROTOCOL_B5.md`
 and was committed before any code change or evaluation. No amendments were needed. Raw numbers are in
 `backtest/results/b5_1_metar_faa.json`.
