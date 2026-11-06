@@ -67,6 +67,14 @@ class AirlineInfo(BaseModel):
     other_channels: dict[str, str] = Field(default_factory=dict)
 
 
+class AirlineNotice(BaseModel):
+    """Shown instead of contact details when `airline` is null but the carrier has a note or status page."""
+    code: str
+    name: str
+    note: Optional[str] = None
+    status_url: Optional[str] = None
+
+
 class RefundRights(BaseModel):
     applies: bool
     jurisdiction: Optional[str] = None
@@ -117,6 +125,7 @@ class OptionsResponse(BaseModel):
     state: DisruptionState
     context: Context
     airline: Optional[AirlineInfo] = None
+    airline_notice: Optional[AirlineNotice] = None
     refund_rights: RefundRights
     alternatives: Alternatives
     hotel: Optional[Hotel] = None

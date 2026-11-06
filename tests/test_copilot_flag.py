@@ -87,7 +87,7 @@ def test_config_shape_defaults(monkeypatch):
         "push": {"enabled": False, "vapid_public_key": None},
         "status_source": "none",
         "affiliate_partners_configured": [],
-        "schedule_as_of": None,
+        "schedule_as_of": "2026-08",   # latest month of models/route_schedule.csv.gz (S-A6 wiring)
     }
 
 

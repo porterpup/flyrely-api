@@ -36,8 +36,9 @@ def affiliate_partners_configured() -> list[str]:
 
 
 def schedule_as_of() -> Optional[str]:
-    """Latest month of the typical-schedule artifact. None until the schedule source (S-A4) is wired in."""
-    return None
+    """Latest month of the typical-schedule artifact (YYYY-MM), or None if the artifact is missing."""
+    from .options import default_schedule  # lazy: reading the artifact must not happen at import
+    return default_schedule().schedule_as_of()
 
 
 @dataclass(frozen=True)
