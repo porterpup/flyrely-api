@@ -185,3 +185,34 @@ class PushPayload(BaseModel):
     body: str
     url: str
     client_flight_id: str
+
+
+# 4.4 / 4.5 push subscribe / unsubscribe
+class PushKeys(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=256)
+    auth: str = Field(min_length=1, max_length=128)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2048)
+    keys: PushKeys
+
+
+class SubscribeRequest(BaseModel):
+    subscription: PushSubscription
+    flight: FlightRef
+    client_flight_id: Optional[str] = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class SubscribeResponse(BaseModel):
+    watch_id: str
+    expires_at: str
+
+
+class UnsubscribeRequest(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2048)
+    watch_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class UnsubscribeResponse(BaseModel):
+    removed: int

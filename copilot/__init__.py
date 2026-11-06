@@ -17,6 +17,8 @@ def mount(app: FastAPI, score: Optional[Scorer] = None) -> None:
 
     app.state.copilot_score = score
     app.include_router(build_router())
+    from . import watcher   # starts nothing unless all three flags are on, and never under pytest
+    watcher.attach(app, score)
 
 
 __all__ = ["mount", "Scorer"]

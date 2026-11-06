@@ -19,5 +19,8 @@ python-dotenv>=1.0.0
 # Prediction log on Postgres/Supabase (only used when DATABASE_URL is set)
 psycopg[binary]==3.2.10
 
+# Disruption copilot web push (imported lazily, only when FLYRELY_COPILOT_PUSH=1). MPL-2.0: used unmodified.
+pywebpush==2.5.0
+
 # Optional: for production
 gunicorn>=21.0.0
