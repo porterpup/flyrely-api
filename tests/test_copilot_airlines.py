@@ -30,10 +30,27 @@ def test_verified_entries_are_complete_and_https():
         assert e["sources"], code
 
 
-def test_unverified_entries_have_a_note():
+def test_verification_status_valid_and_consistent():
     for code, e in DATA.items():
-        if e["verified_on"] is None:
+        assert e["verification"] in {"verified", "official_source_unconfirmed", "unknown"}, code
+        assert (e["verification"] == "verified") == bool(e["verified_on"]), code
+        if e["verification"] == "unknown":
+            assert e["phone"] is None, code
+        else:
+            assert e["phone"] and e["manage_booking_url"] and e["sources"], code
+        assert isinstance(e["other_channels"], dict), code
+
+
+def test_unconfirmed_and_unknown_entries_have_a_note():
+    for code, e in DATA.items():
+        if e["verification"] != "verified":
             assert e["note"], code
+
+
+def test_nk_has_status_url_and_no_phone():
+    e = airlines.get_entry("nk")
+    assert e["phone"] is None and e["status_url"].startswith("https://")
+    assert "call center" in e["note"]
 
 
 def test_lookup_returns_verified_carrier():
@@ -56,9 +73,26 @@ def test_unknown_or_regional_codes_return_none(code):
     assert airlines.lookup(code) is None
 
 
-@pytest.mark.parametrize("code", [c for c in CARRIERS if DATA[c]["verified_on"] is None])
-def test_unverified_carriers_return_none(code):
+@pytest.mark.parametrize("code", [c for c in CARRIERS if DATA[c]["verification"] == "unknown"])
+def test_unknown_carriers_return_none(code):
     assert airlines.lookup(code) is None
+
+
+@pytest.mark.parametrize("code", [c for c in CARRIERS if DATA[c]["verification"] != "unknown"])
+def test_shown_carriers_have_phone(code):
+    info = airlines.lookup(code)
+    assert info.phone == DATA[code]["phone"] and info.verification == DATA[code]["verification"]
+
+
+def test_every_carrier_but_nk_shows_a_phone():
+    assert [c for c in CARRIERS if not airlines.lookup(c)] == ["NK"]
+
+
+def test_unconfirmed_carrier_marked_and_channels_returned():
+    info = airlines.lookup("B6")
+    assert info.verification == "official_source_unconfirmed"
+    assert info.other_channels["x"] == "@jetblue"
+    assert airlines.lookup("DL").verification == "verified"
 
 
 def test_lookup_reads_given_path(tmp_path):
