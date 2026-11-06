@@ -62,7 +62,9 @@ class AirlineInfo(BaseModel):
     manage_booking_url: str
     phone: str
     phone_display: str
-    verified_on: str
+    verified_on: Optional[str] = None
+    verification: Literal["verified", "official_source_unconfirmed"] = "verified"
+    other_channels: dict[str, str] = Field(default_factory=dict)
 
 
 class RefundRights(BaseModel):
