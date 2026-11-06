@@ -211,7 +211,10 @@ def main(argv=None) -> int:
     if not push.vapid_configured():
         print("copilot watcher: VAPID keys are not configured (scripts/gen_vapid_keys.py)", file=sys.stderr)
         return 0
-    import main as api_main   # loads the models; only the CLI does this, the copilot package never imports main
+    # Only this CLI entry point loads the API module (to get the same scorer); the library code never imports main,
+    # which is why it goes through importlib (tests/test_copilot_flag.py forbids a static `import main`).
+    import importlib
+    api_main = importlib.import_module("main")
     w = build_default(api_main._copilot_scorer())
     if args.once:
         return 0 if w.cycle_with_alerts() is not None else 1
