@@ -827,6 +827,22 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
 
 
 # =============================================================================
+# Disruption copilot (docs/PLAN_DISRUPTION_COPILOT.md): mounted only behind the flag
+# =============================================================================
+
+def _copilot_scorer():
+    """Booking-time scorer for the copilot. Does not write to the prediction or usage logs."""
+    def score(origin: str, destination: str, dep_time: datetime, airline: Optional[str]):
+        return model_service.predict(build_features(origin, destination, dep_time, airline))
+    return score
+
+
+if os.getenv("FLYRELY_FEATURE_DISRUPTION_COPILOT") == "1":
+    from copilot import mount as _copilot_mount
+    _copilot_mount(app, score=_copilot_scorer())
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
