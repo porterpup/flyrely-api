@@ -1,0 +1,141 @@
+{
+  "as_of": "2026-11-06",
+  "fields": {
+    "manage_booking_url": "https URL of the manage-trip page on the airline's own site, or null if not verified",
+    "phone": "customer-service number in E.164 form, or null if not verified",
+    "phone_display": "same number, US display form",
+    "verified_on": "date both manage_booking_url and phone were checked by hand, or null",
+    "sources": "official page(s) the values were taken from",
+    "note": "why a field is null, when it is"
+  },
+  "airlines": {
+    "DL": {
+      "name": "Delta Air Lines",
+      "manage_booking_url": "https://www.delta.com/mytrips/",
+      "phone": "+1-800-221-1212",
+      "phone_display": "800-221-1212",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.delta.com/us/en/need-help/overview",
+        "https://www.delta.com/us/en/need-help/support-flights",
+        "https://www.delta.com/us/en/manage-trips/overview (404 page; links to /mytrips/)"
+      ],
+      "note": null
+    },
+    "WN": {
+      "name": "Southwest Airlines",
+      "manage_booking_url": "https://www.southwest.com/air/manage-reservation/",
+      "phone": "+1-800-435-9792",
+      "phone_display": "800-435-9792",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.southwest.com/air/manage-reservation/",
+        "https://support.southwest.com/helpcenter/article/More-phone-numbers-contact-options"
+      ],
+      "note": null
+    },
+    "AS": {
+      "name": "Alaska Airlines",
+      "manage_booking_url": "https://www.alaskaair.com/booking/reservation-lookup",
+      "phone": "+1-800-252-7522",
+      "phone_display": "800-252-7522",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.alaskaair.com/content/about-us/help-contact/contact-us",
+        "https://www.alaskaair.com/booking/reservation-lookup"
+      ],
+      "note": null
+    },
+    "F9": {
+      "name": "Frontier Airlines",
+      "manage_booking_url": "https://www.flyfrontier.com/travel/my-trips/manage-trip/",
+      "phone": "+1-602-333-5925",
+      "phone_display": "602-333-5925",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://faq.flyfrontier.com/help/how-do-i-contact-frontier-airlines",
+        "https://www.flyfrontier.com/travel/my-trips/manage-trip/"
+      ],
+      "note": null
+    },
+    "HA": {
+      "name": "Hawaiian Airlines",
+      "manage_booking_url": "https://www.hawaiianairlines.com/mytrips",
+      "phone": "+1-800-367-5320",
+      "phone_display": "800-367-5320",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www2.hawaiianairlines.com/contact-us/call",
+        "https://www.hawaiianairlines.com/mytrips"
+      ],
+      "note": "An older Hawaiian Manage Trip page lists +1-800-713-1220; treated as stale."
+    },
+    "AA": {
+      "name": "American Airlines",
+      "manage_booking_url": null,
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://www.aa.com/web/i18n/customer-service/contact-american/reservations-and-ticket-changes.html"
+      ],
+      "note": "Reservations line 800-433-7300 appears on the aa.com page but was not confirmed by a direct page read (aa.com returned 403). Manage-trip URL not verified."
+    },
+    "UA": {
+      "name": "United Airlines",
+      "manage_booking_url": null,
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://cloud.enews.united.com/text-messaging-terms.html"
+      ],
+      "note": "1-800-UNITED-1 (800-864-8331) appears on a united.com page, but the phone is not confirmed on a page that is reservations-specific. Manage-trip URL not verified (united.com fetch timed out)."
+    },
+    "B6": {
+      "name": "JetBlue Airways",
+      "manage_booking_url": null,
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://www.jetblue.com/travel-agents/contact-info",
+        "https://www.jetblue.com/help/receipts-and-itineraries"
+      ],
+      "note": "Sources disagree: 1-800-538-2583 is cited in an old press release and a help page for SSR requests; 1-888-538-2583 is the groups desk; 1-800-336-5530 is listed as TTY on flight terms. Manage-trip page fetch showed no trip details. Neither field verified."
+    },
+    "G4": {
+      "name": "Allegiant Air",
+      "manage_booking_url": "https://www.allegiantair.com/manage-travel",
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://www.allegiantair.com/contactus"
+      ],
+      "note": "Manage-trip URL confirmed from the Manage Trip header link. The contact page read showed only a text line (+1 866-432-6165), not a voice line; (702) 505-8888 from search snippets is not confirmed. Phone unverified."
+    },
+    "SY": {
+      "name": "Sun Country Airlines",
+      "manage_booking_url": null,
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://suncountry.com/contact-us"
+      ],
+      "note": "Reservations line 651-905-2737 appears on Sun Country pages per search snippets, not confirmed by direct read. Manage-trip URL not verified."
+    },
+    "NK": {
+      "name": "Spirit Airlines",
+      "manage_booking_url": null,
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://customersupport.spirit.com/en-us/category/article/KA-01219"
+      ],
+      "note": "Spirit's support page says an orderly wind-down began 2026-05-02, all flights cancelled, and no customer call center remains. No customer-service number is published; do not show a phone."
+    }
+  }
+}

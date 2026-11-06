@@ -40,3 +40,4 @@ reports/
 
 # SWIM service logs (deploy/install_services.py)
 logs/
+!copilot/data/
