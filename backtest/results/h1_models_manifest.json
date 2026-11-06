@@ -397,10 +397,10 @@
     "n_differences": 0
   },
   "code": {
-    "commit": "d1f1957cf2ecb93990be5c06e48a6f670b4c5343",
+    "commit": "89be2a4fb22ca37081ac93dca78d0ba530a0e74d",
     "dirty": false
   },
-  "created_utc": "2026-11-05T22:42:10Z",
+  "created_utc": "2026-11-06T00:49:33Z",
   "note": "code.commit is the commit checked out at freeze time; the protocol's code-freeze hash is the merge commit of the holdout tooling",
   "airports_file_sha256": "f8ab39252b8a375dd794ab83495ac8618331ca0153a79991e46e93bd13c0f9e6"
 }
