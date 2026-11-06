@@ -91,6 +91,10 @@ _PG_DDL = [
 ]
 
 
+class TooManyWatchesTotal(Exception):
+    """The global cap on active watches is reached."""
+
+
 class TooManyWatches(Exception):
     """The endpoint already has MAX_WATCHES_PER_ENDPOINT active watches."""
 
@@ -220,7 +224,7 @@ class PushStore:
     # ------------------------------------------------------------------ API
     def subscribe(self, *, endpoint: str, p256dh: str, auth: str, airline: str, flight_number: str, origin: str,
                   destination: str, departure: datetime, client_flight_id: Optional[str] = None,
-                  now: Optional[datetime] = None) -> Watch:
+                  now: Optional[datetime] = None, max_total: Optional[int] = None) -> Watch:
         """Idempotent on (endpoint, flight): a repeat call refreshes the keys and returns the same watch."""
         now = now or datetime.now(timezone.utc)
         key = (endpoint, airline, flight_number, origin, self._local(departure))
@@ -236,6 +240,11 @@ class PushStore:
                                   (endpoint, self._ts(now)), fetch=True)
             if count[0][0] >= MAX_WATCHES_PER_ENDPOINT:
                 raise TooManyWatches()
+            if max_total is not None:
+                total, _ = self._exec("SELECT COUNT(*) FROM copilot_push_watches WHERE expires_at > ?",
+                                      (self._ts(now),), fetch=True)
+                if total[0][0] >= max_total:
+                    raise TooManyWatchesTotal()
             self._exec(
                 f"INSERT INTO copilot_push_watches ({', '.join(COLUMNS)}) "
                 f"VALUES ({', '.join(['?'] * len(COLUMNS))}) ON CONFLICT DO NOTHING",

@@ -44,13 +44,13 @@ def test_verification_status_valid_and_consistent():
 def test_unconfirmed_and_unknown_entries_have_a_note():
     for code, e in DATA.items():
         if e["verification"] != "verified":
-            assert e["note"], code
+            assert e.get("note") or e.get("user_note"), code
 
 
 def test_nk_has_status_url_and_no_phone():
     e = airlines.get_entry("nk")
     assert e["phone"] is None and e["status_url"].startswith("https://")
-    assert "call center" in e["note"]
+    assert "call center" in e["user_note"] and "note" not in e
 
 
 def test_lookup_returns_verified_carrier():

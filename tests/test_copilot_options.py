@@ -2,7 +2,7 @@
 import gzip
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -74,7 +74,8 @@ def test_away_cancelled_full_response(make_client):
     j = r.json()
     assert j["context"] == {"location": "away", "reason": "origin_not_home", "home_airport": "BOS"}
     assert j["airline"]["code"] == "DL"
-    assert j["refund_rights"] == {"applies": True, "jurisdiction": "US_DOT", "content_key": "us_dot_part260_v1"}
+    assert j["refund_rights"] == {"applies": True, "jurisdiction": "US_DOT", "content_key": "us_dot_part260_v2",
+                                   "international": False, "eu_possible": None}
     alt = j["alternatives"]
     assert alt["source"] == "bts_typical_schedule" and alt["schedule_as_of"] == "2026-08" and alt["date"] == FLIGHT_DAY
     nums = [i["flight_number"] for i in alt["items"]]
@@ -123,10 +124,70 @@ def test_rebooked_today_vs_later(make_client):
     assert later["hotel"] is not None and later["ride"]["purpose"] == "to_hotel"
 
 
-def test_hotel_check_in_today_when_flight_is_tomorrow_night(make_client):
-    c = make_client(now=noon_utc("2026-11-15", 4))   # 23:00 local on the 14th... 04:00Z = 23:00 EST on the 14th
-    j = c.post("/copilot/options", json=body()).json()
-    assert j["hotel"]["check_in"] == "2026-11-14" and j["hotel"]["check_out"] == FLIGHT_DAY
+@pytest.mark.parametrize("day,hour,check_in", [
+    ("2026-11-16", 5, "2026-11-15"),    # 00:30 local the day after the flight is still "tonight" = the 15th
+    ("2026-11-16", 15, "2026-11-16"),   # 10:00 local the day after
+    ("2026-11-15", 6, "2026-11-15"),    # 01:30 local on the flight day: tonight is the 14th, flight date wins
+    ("2026-11-15", 3, "2026-11-15"),    # 22:00 local the day before an evening flight
+    ("2026-11-15", 14, "2026-11-15"),   # normal same-day case, 09:00 local
+])
+def test_hotel_check_in_dates(make_client, day, hour, check_in):
+    minute_shift = 30 if (day, hour) in (("2026-11-16", 5), ("2026-11-15", 6)) else 0
+    base = noon_utc(day, hour)()
+    now = lambda: base + timedelta(minutes=minute_shift)   # 05:30Z = 00:30 EST, 06:30Z = 01:30 EST
+    b = body()
+    b["flight"]["departure_time"] = f"{FLIGHT_DAY}T20:00:00"
+    j = make_client(now=now).post("/copilot/options", json=b).json()
+    assert j["hotel"]["check_in"] == check_in
+    assert j["hotel"]["check_out"] == (date.fromisoformat(check_in) + timedelta(days=1)).isoformat()
+
+
+def test_alternatives_deduped_by_flight_keep_most_days_seen(tmp_path):
+    p = tmp_path / "route_schedule.csv.gz"
+    rows = ["AA,33,JFK,LAX,07:05,10:30,AA,33,127,3,2026-08", "AA,33,JFK,LAX,07:29,10:55,AA,33,127,9,2026-08",
+            "AA,117,JFK,LAX,16:00,19:25,AA,117,127,8,2026-08"]
+    with gzip.open(p, "wt") as f:
+        f.write(HEADER + "\n".join(rows) + "\n")
+    app = FastAPI()
+    mount(app, score=fake_score)
+    app.state.copilot_schedule = BtsTypicalSchedule(p)
+    app.state.copilot_now = noon_utc(hour=11)   # 06:00 local
+    j = TestClient(app).post("/copilot/options", json=body()).json()
+    aa33 = [i for i in j["alternatives"]["items"] if i["flight_number"] == "AA33"]
+    assert len(aa33) == 1 and aa33[0]["days_seen"] == 9 and aa33[0]["dep_local"].endswith("07:29:00")
+    assert len(j["alternatives"]["items"]) == 2
+
+
+def test_internal_note_never_leaks(make_client):
+    from copilot import airlines
+    entry = airlines.get_entry("NK")
+    internal = entry["internal_note"]
+    b = body()
+    b["flight"].update(airline="NK", flight_number="NK100")
+    r = make_client().post("/copilot/options", json=b)
+    assert r.json()["airline_notice"]["note"] == entry["user_note"]
+    assert internal not in r.text and "do not show" not in r.text.lower() and "internal_note" not in r.text
+
+
+def test_contact_details_are_of_the_booked_marketing_carrier(make_client):
+    b = body()
+    b["flight"].update(airline="DL", flight_number="DL1234")
+    j = make_client().post("/copilot/options", json=b).json()
+    assert j["airline"]["code"] == "DL"
+    ua = next(i for i in j["alternatives"]["items"] if i["marketing_airline"] == "UA")
+    assert ua["operating_airline"] == "OO"   # informational only; no OO contact card exists
+    b["flight"].update(airline="UA", flight_number="UA900")
+    assert make_client().post("/copilot/options", json=b).json()["airline"]["code"] == "UA"
+
+
+def test_refund_rights_international_flags(make_client):
+    j = make_client().post("/copilot/options", json=body()).json()
+    assert j["refund_rights"]["international"] is False and j["refund_rights"]["eu_possible"] is None
+    b = body()
+    b["flight"].update(origin="JFK", destination="SJU", flight_number="DL1")
+    j = make_client().post("/copilot/options", json=b).json()
+    assert j["refund_rights"]["applies"] is True and j["refund_rights"]["international"] is True
+    assert j["refund_rights"]["content_key"] == "us_dot_part260_v2"
 
 
 def test_no_alternatives(make_client):
@@ -143,7 +204,8 @@ def test_non_us_route_per_state_column(make_client):
     b = body()
     b["flight"].update(origin="SJU", destination="BQN", airline="BA", flight_number="BA304")
     j = make_client().post("/copilot/options", json=b).json()
-    assert j["refund_rights"] == {"applies": False, "jurisdiction": None, "content_key": None}
+    assert j["refund_rights"] == {"applies": False, "jurisdiction": None, "content_key": None,
+                                   "international": True, "eu_possible": None}
     assert j["alternatives"]["items"] == [] and "non_us_route" in j["alternatives"]["warnings"]
     assert j["alternatives"]["search_handoffs"]
 

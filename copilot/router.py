@@ -1,9 +1,9 @@
 """/copilot endpoints (plan §4): GET /config, POST /options, POST /status."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from . import config, options, push_store, status as status_mod
+from . import config, options, push_store, ratelimit, status as status_mod
 from .schemas import (ConfigResponse, OptionsRequest, OptionsResponse, PushConfig, StatusRequest, StatusResponse,
                       SubscribeRequest, SubscribeResponse, UnsubscribeRequest, UnsubscribeResponse)
 
@@ -19,7 +19,7 @@ def _push_store(request: Request) -> push_store.PushStore:
 
 
 def build_router() -> APIRouter:
-    router = APIRouter(prefix="/copilot", tags=["copilot"])
+    router = APIRouter(prefix="/copilot", tags=["copilot"], dependencies=[Depends(ratelimit.rate_limit)])
 
     @router.get("/config", response_model=ConfigResponse)
     def get_config() -> ConfigResponse:
@@ -67,6 +67,7 @@ def build_router() -> APIRouter:
         now = now() if now is not None else datetime.now(timezone.utc)
         if push_store.expiry_for(departure) <= now:
             raise HTTPException(status_code=422, detail="flight is in the past")
+        origin, destination = options._airport(flight.origin).iata, options._airport(flight.destination).iata
         airline = (flight.airline or "").strip().upper()
         number = flight.flight_number.strip().upper()
         if not number or len(number) > 12:
@@ -74,11 +75,20 @@ def build_router() -> APIRouter:
         try:
             watch = store.subscribe(
                 endpoint=sub.endpoint, p256dh=sub.keys.p256dh, auth=sub.keys.auth, airline=airline,
-                flight_number=number, origin=flight.origin.strip().upper(),
-                destination=flight.destination.strip().upper(), departure=departure,
-                client_flight_id=body.client_flight_id, now=now)
+                flight_number=number, origin=origin,
+                destination=destination, departure=departure,
+                client_flight_id=body.client_flight_id, now=now, max_total=config.max_watches())
+        except push_store.TooManyWatchesTotal:
+            if not getattr(request.app.state, "copilot_cap_alerted", False):   # alert once per episode
+                request.app.state.copilot_cap_alerted = True
+                import alerts
+                alerts.send_alert("FlyRely copilot: push watch cap reached",
+                                  f"Active push watches hit FLYRELY_COPILOT_MAX_WATCHES={config.max_watches()}; "
+                                  "new subscriptions are being refused with 429.")
+            raise HTTPException(status_code=429, detail="push alerts are temporarily at capacity")
         except push_store.TooManyWatches:
             raise HTTPException(status_code=429, detail="too many active alerts for this device")
+        request.app.state.copilot_cap_alerted = False
         return SubscribeResponse(watch_id=watch.watch_id,
                                  expires_at=watch.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"))
 

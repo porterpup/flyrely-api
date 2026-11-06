@@ -76,3 +76,11 @@ def watch_interval_s() -> float:
         return max(30.0, float(os.getenv("FLYRELY_COPILOT_WATCH_INTERVAL_S") or 900))
     except ValueError:
         return 900.0
+
+
+def max_watches() -> int:
+    """Global cap on active push watches (FLYRELY_COPILOT_MAX_WATCHES, default 5000)."""
+    try:
+        return max(1, int(os.getenv("FLYRELY_COPILOT_MAX_WATCHES") or 5000))
+    except ValueError:
+        return 5000

@@ -9,11 +9,11 @@ FlightStatus = Literal["unknown", "scheduled", "delayed", "cancelled", "departed
 
 
 class FlightRef(BaseModel):
-    airline: Optional[str] = None
-    flight_number: str
-    origin: str
-    destination: str
-    departure_time: str  # local wall-clock ISO, as in /predict
+    airline: Optional[str] = Field(default=None, min_length=2, max_length=3, pattern=r"^[A-Za-z0-9]{2,3}$")
+    flight_number: str = Field(min_length=1, max_length=12, pattern=r"^\s*(?:[A-Za-z0-9]{2}|[A-Za-z]{3})\s?\d{1,4}[A-Za-z]?\s*$|^\s*\d{1,4}[A-Za-z]?\s*$")
+    origin: str = Field(min_length=3, max_length=3, pattern=r"^[A-Za-z]{3}$")
+    destination: str = Field(min_length=3, max_length=3, pattern=r"^[A-Za-z]{3}$")
+    departure_time: str = Field(max_length=40)  # local wall-clock ISO, as in /predict
 
 
 # 4.1 /copilot/config
@@ -35,7 +35,7 @@ class OptionsRequest(BaseModel):
     flight: FlightRef
     state: DisruptionState
     rebooked: Optional[Literal["today", "later"]] = None
-    home_airport: Optional[str] = None
+    home_airport: Optional[str] = Field(default=None, max_length=8)
     max_alternatives: int = Field(default=8, ge=1, le=15)
 
 
@@ -79,6 +79,10 @@ class RefundRights(BaseModel):
     applies: bool
     jurisdiction: Optional[str] = None
     content_key: Optional[str] = None
+    # Additive (v2). international: either end is outside the 50 states + DC (airports_ref has no state for
+    # territories and non-US airports). eu_possible: None = not determinable (airports_ref is US-only).
+    international: bool = False
+    eu_possible: Optional[bool] = None
 
 
 class AlternativeItem(BaseModel):
@@ -144,37 +148,6 @@ class StatusResponse(BaseModel):
     source: str
     as_of: Optional[str] = None
     detail: Optional[str] = None
-
-
-# 4.4 / 4.5 push
-class PushKeys(BaseModel):
-    p256dh: str
-    auth: str
-
-
-class PushSubscription(BaseModel):
-    endpoint: str
-    keys: PushKeys
-
-
-class SubscribeRequest(BaseModel):
-    subscription: PushSubscription
-    flight: FlightRef
-    client_flight_id: str
-
-
-class SubscribeResponse(BaseModel):
-    watch_id: str
-    expires_at: str
-
-
-class UnsubscribeRequest(BaseModel):
-    endpoint: str
-    watch_id: Optional[str] = None
-
-
-class UnsubscribeResponse(BaseModel):
-    removed: int
 
 
 # 4.6 push payload
