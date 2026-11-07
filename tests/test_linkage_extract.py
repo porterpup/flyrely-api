@@ -311,22 +311,22 @@ def test_tail_follows_growing_file_and_resumes(tmp_path):
     w.write_batch([mk(0), mk(1)])
     path = next((root / "tfms").glob("*/*.zst"))
     t = FileTail(path)
-    assert [json.loads(x)["body"] for x in t.poll()] == ["m0", "m1"]
-    assert t.poll() == []
+    assert [json.loads(x)["body"] for x in list(t.poll())] == ["m0", "m1"]
+    assert list(t.poll()) == []
     w.write_batch([mk(2)])
-    assert [json.loads(x)["body"] for x in t.poll()] == ["m2"]
+    assert [json.loads(x)["body"] for x in list(t.poll())] == ["m2"]
     # a restart re-reads from the start and skips what was already processed
     t2 = FileTail(path, skip_lines=3)
-    assert t2.poll() == []
+    assert list(t2.poll()) == []
     w.write_batch([mk(3), mk(4)])
-    assert [json.loads(x)["body"] for x in t2.poll()] == ["m3", "m4"]
+    assert [json.loads(x)["body"] for x in list(t2.poll())] == ["m3", "m4"]
     # decoder trouble falls back to re-read + skip
     t3 = FileTail(path)
-    t3.poll()
+    list(t3.poll())
     t3.offset = 7                       # decoder is now misaligned: next feed raises ZstdError
     w.write_batch([mk(5)])
-    assert [json.loads(x)["body"] for x in t3.poll()] == ["m5"]     # fallback re-read, skipping the 5 done
-    assert t3.reread and t3.poll() == []
+    assert [json.loads(x)["body"] for x in list(t3.poll())] == ["m5"]     # fallback re-read, skipping the 5 done
+    assert t3.reread and list(t3.poll()) == []
     w.close()
 
 
