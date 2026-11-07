@@ -147,6 +147,8 @@ app.add_middleware(
 
 import feedback  # noqa: E402
 feedback.mount(app)
+import flight_lookup  # noqa: E402   (imports copilot lazily, so the copilot flag-off sentinel holds)
+flight_lookup.mount(app)
 
 # =============================================================================
 # Usage Logging

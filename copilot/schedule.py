@@ -54,6 +54,7 @@ class BtsTypicalSchedule:
         self.path = Path(path)
         self._by_route: Optional[dict[tuple[str, str], list[tuple[int, ScheduledFlight]]]] = None
         self._as_of: Optional[str] = None
+        self._by_number: Optional[dict] = None
         self._lock = threading.Lock()
 
     def _load(self):
@@ -86,6 +87,22 @@ class BtsTypicalSchedule:
         self._load()
         bit = 1 << _to_date(date).weekday()     # Monday = bit 0, as in the CSV
         return [f for mask, f in self._by_route.get((origin.upper(), dest.upper()), []) if mask & bit]
+
+    def flights_by_number(self, airline: str, number: str, date) -> list[ScheduledFlight]:
+        """Every leg of marketing flight `airline``number` usually scheduled on this date's weekday (earliest first).
+
+        One number can be several legs (through-flights) or several daily frequencies; all are returned.
+        """
+        self._load()
+        if self._by_number is None:
+            idx: dict = {}
+            for rows in self._by_route.values():
+                for mask, f in rows:
+                    idx.setdefault((f.marketing_airline, f.flight_number[len(f.marketing_airline):]), []).append((mask, f))
+            self._by_number = idx
+        bit = 1 << _to_date(date).weekday()
+        hits = [f for mask, f in self._by_number.get((airline.upper(), str(number).lstrip("0")), []) if mask & bit]
+        return sorted(hits, key=lambda f: f.dep_time)
 
     def schedule_as_of(self) -> Optional[str]:
         """Latest BTS month in the artifact (YYYY-MM), or None if the file is missing."""
