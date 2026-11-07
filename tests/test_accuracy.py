@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import alerts  # noqa: E402
+from alerts import _post as REAL_ALERT_POST  # noqa: E402  (captured before conftest blocks alerts._post)
 import outcomes  # noqa: E402
 import score_live  # noqa: E402
 from prediction_log import PredictionStore, build_record  # noqa: E402
@@ -183,6 +184,7 @@ def test_alert_channels(monkeypatch):
         def __exit__(self, *a): return False
         def read(self): return b""
 
+    monkeypatch.setattr(alerts, "_post", REAL_ALERT_POST)  # exercise the real post, with urlopen faked below
     monkeypatch.setattr(alerts.urllib.request, "urlopen", lambda req, timeout=0: posted.append(req) or Resp())
     sent = {}
 
@@ -282,6 +284,7 @@ def test_postgres_round_trip(tmp_path):
 def test_alert_failure_never_raises(monkeypatch, caplog):
     def boom(*a, **k):
         raise OSError("https://secret-webhook")
+    monkeypatch.setattr(alerts, "_post", REAL_ALERT_POST)
     monkeypatch.setattr(alerts.urllib.request, "urlopen", boom)
     assert alerts.send_alert("s", "b", env={"FLYRELY_ALERT_DISCORD_WEBHOOK": "https://secret-webhook"}) == []
     assert "secret-webhook" not in caplog.text
