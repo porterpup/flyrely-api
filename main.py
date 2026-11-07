@@ -145,6 +145,9 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+import feedback  # noqa: E402
+app.include_router(feedback.router)
+
 # =============================================================================
 # Usage Logging
 # =============================================================================
