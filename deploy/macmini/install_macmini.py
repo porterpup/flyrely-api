@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Install the Mac mini LaunchAgents: API, web, three SWIM consumers, retention, health (log only).
+"""Install the Mac mini LaunchAgents: API, web, three SWIM consumers, retention, health (log only), and the
+L1 linkage extractor (com.flyrely.linkage.extract).
 No sudo. Idempotent: it writes the plists and (re)loads them. The copilot watcher is NOT installed.
 
   python deploy/macmini/install_macmini.py [--dry-run] [--uninstall]
@@ -17,6 +18,7 @@ LA = Path.home() / "Library" / "LaunchAgents"
 LOGS = Path.home() / "Library" / "Logs" / "flyrely"
 DOM = f"gui/{os.getuid()}"
 SERVICES = {"com.flyrely.api": "run-api.sh", "com.flyrely.web": "run-web.sh"}
+LINKAGE = ["com.flyrely.linkage.extract"]
 SWIM = ["com.flyrely.swim.tfms", "com.flyrely.swim.sfdps", "com.flyrely.swim.stdds",
         "com.flyrely.swim.retention", "com.flyrely.swim.health"]
 
@@ -45,10 +47,28 @@ def sh(cmd, dry, ignore=False):
             sys.exit(r.stdout + r.stderr)
 
 
+def install_linkage(py, dry):
+    """L1 extractor: RunAtLoad + KeepAlive, logs in ~/Library/Logs/flyrely/linkage-extract*.log."""
+    label = LINKAGE[0]
+    vals = {"LABEL": label, "PYTHON": str(py), "REPO": str(REPO), "ENV_FILE": str(REPO / ".env"), "LOG_DIR": str(LOGS)}
+    text = (REPO / "deploy" / "templates" / "launchd-linkage.plist.tmpl").read_text()
+    for k, v in vals.items():
+        text = text.replace(f"__{k}__", escape(v))
+    p = LA / f"{label}.plist"
+    print(("[dry-run] " if dry else "") + "writing", p)
+    if not dry:
+        LA.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+        p.chmod(0o644)
+        sh(["launchctl", "bootout", f"{DOM}/{label}"], dry, ignore=True)
+        sh(["launchctl", "enable", f"{DOM}/{label}"], dry)
+        sh(["launchctl", "bootstrap", DOM, str(p)], dry)
+
+
 def main():
     dry, un = "--dry-run" in sys.argv, "--uninstall" in sys.argv
     if un:
-        for label in list(SERVICES) + SWIM:
+        for label in list(SERVICES) + SWIM + LINKAGE:
             sh(["launchctl", "bootout", f"{DOM}/{label}"], dry, ignore=True)
             p = LA / f"{label}.plist"
             print("removing", p)
@@ -69,6 +89,7 @@ def main():
             sh(["launchctl", "enable", f"{DOM}/{label}"], dry)
             sh(["launchctl", "bootstrap", DOM, str(p)], dry)
     py = REPO / "venv" / "bin" / "python"
+    install_linkage(py, dry)
     cmd = [str(py), str(REPO / "deploy" / "install_services.py"), "--mode", "agent",
            "--sources", "tfms,sfdps,stdds", "--python", str(py), "--log-dir", str(LOGS),
            # 7 days of TFMS+SFDPS (~1.1 GB/day) plus STDDS 1 day (~4.3 GB/day, set in swim/retention.py)
