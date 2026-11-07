@@ -1,7 +1,8 @@
 """ntfy.sh push notifications with once-per-incident de-duplication.
 
 Env: FLYRELY_NTFY_TOPIC (unset = log only, never an error), FLYRELY_NTFY_SERVER (default https://ntfy.sh).
-The topic acts as the password, so it is never logged.
+The topic acts as the password, so it is never logged. Under pytest (PYTEST_CURRENT_TEST set) nothing is sent
+unless FLYRELY_NTFY_ALLOW_IN_TESTS=1, so a test run can never page the owner.
 
 State is a small JSON file {problem_key: message} of the problems currently open. `transitions` compares it
 with the current problems: new keys alert once, keys that disappeared send "recovered".
@@ -37,6 +38,12 @@ def save_state(path: Path, state: dict) -> None:
     os.replace(tmp, p)
 
 
+def _post(url: str, data: bytes, headers: dict) -> None:
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as r:
+        r.read()
+
+
 def send(title: str, body: str, priority: str = "default", tags: str = "", env=None) -> bool:
     """POST to ntfy. Returns True if sent. Never raises; no topic means a logged no-op."""
     env = os.environ if env is None else env
@@ -44,15 +51,16 @@ def send(title: str, body: str, priority: str = "default", tags: str = "", env=N
     if not topic:
         log.info("ntfy not configured (FLYRELY_NTFY_TOPIC unset): %s | %s", title, body)
         return False
+    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("FLYRELY_NTFY_ALLOW_IN_TESTS") != "1":
+        log.info("ntfy send refused under pytest (set FLYRELY_NTFY_ALLOW_IN_TESTS=1 to allow): %s", title)
+        return False
     server = (env.get("FLYRELY_NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
     headers = {"Title": title.encode("ascii", "replace").decode(), "Priority": priority,
                "User-Agent": "flyrely-alerts"}
     if tags:
         headers["Tags"] = tags
     try:
-        req = urllib.request.Request(f"{server}/{topic}", data=body.encode(), headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            r.read()
+        _post(f"{server}/{topic}", body.encode(), headers)
         return True
     except Exception as e:  # type only: URL errors can echo the topic
         log.warning("ntfy send failed: %s", type(e).__name__)
