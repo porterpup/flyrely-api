@@ -3,7 +3,7 @@
 L1 linkage extractor (com.flyrely.linkage.extract).
 No sudo. Idempotent: it writes the plists and (re)loads them. The copilot watcher is NOT installed.
 
-  python deploy/macmini/install_macmini.py [--dry-run] [--uninstall]
+  python deploy/macmini/install_macmini.py [--dry-run] [--uninstall] [--only schedule-refresh]
 Redeploy after a code change: see HANDOFF.md ("Hosting: Mac mini").
 """
 import os
@@ -19,6 +19,7 @@ LOGS = Path.home() / "Library" / "Logs" / "flyrely"
 DOM = f"gui/{os.getuid()}"
 SERVICES = {"com.flyrely.api": "run-api.sh", "com.flyrely.web": "run-web.sh"}
 LINKAGE = ["com.flyrely.linkage.extract"]
+REFRESH = "com.flyrely.schedule.refresh"
 SWIM = ["com.flyrely.swim.tfms", "com.flyrely.swim.sfdps", "com.flyrely.swim.stdds",
         "com.flyrely.swim.retention", "com.flyrely.swim.health"]
 
@@ -65,8 +66,37 @@ def install_linkage(py, dry):
         sh(["launchctl", "bootstrap", DOM, str(p)], dry)
 
 
+def install_schedule_refresh(dry):
+    """Weekly schedule-refresh job (template deploy/templates/launchd-schedule-refresh.plist.tmpl)."""
+    sys.path.insert(0, str(REPO / "deploy"))
+    from install_services import fill
+    py = REPO / "venv" / "bin" / "python"
+    text = fill((REPO / "deploy" / "templates" / "launchd-schedule-refresh.plist.tmpl").read_text(), {
+        "LABEL": REFRESH, "PYTHON": escape(str(py)), "REPO": escape(str(REPO)),
+        "ENV_FILE": escape(str(REPO / ".env")), "LOG_DIR": escape(str(LOGS))})
+    p = LA / f"{REFRESH}.plist"
+    print(("[dry-run] " if dry else "") + "writing", p)
+    if dry:
+        return
+    LOGS.mkdir(parents=True, exist_ok=True)
+    LA.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    p.chmod(0o644)
+    sh(["launchctl", "bootout", f"{DOM}/{REFRESH}"], dry, ignore=True)
+    sh(["launchctl", "enable", f"{DOM}/{REFRESH}"], dry)
+    sh(["launchctl", "bootstrap", DOM, str(p)], dry)
+
+
 def main():
     dry, un = "--dry-run" in sys.argv, "--uninstall" in sys.argv
+    if "--only" in sys.argv and sys.argv[sys.argv.index("--only") + 1:][:1] == ["schedule-refresh"]:
+        if un:
+            sh(["launchctl", "bootout", f"{DOM}/{REFRESH}"], dry, ignore=True)
+            if not dry:
+                (LA / f"{REFRESH}.plist").unlink(missing_ok=True)
+        else:
+            install_schedule_refresh(dry)
+        return
     if un:
         for label in list(SERVICES) + SWIM + LINKAGE:
             sh(["launchctl", "bootout", f"{DOM}/{label}"], dry, ignore=True)

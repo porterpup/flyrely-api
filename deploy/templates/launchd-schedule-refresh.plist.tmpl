@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>scripts/refresh_schedule.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FLYRELY_ENV_FILE</key>
+        <string>__ENV_FILE__</string>
+    </dict>
+    <!-- weekly, Monday 05:41 local; a no-op unless a new BTS month is out (and the holdout gate is open) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>41</integer>
+    </dict>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/schedule-refresh.log</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/schedule-refresh.log</string>
+</dict>
+</plist>
