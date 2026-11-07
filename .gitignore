@@ -41,3 +41,4 @@ reports/
 # SWIM service logs (deploy/install_services.py)
 logs/
 !copilot/data/
+models/route_schedule.csv.gz.prev

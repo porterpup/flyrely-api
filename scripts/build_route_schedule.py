@@ -59,24 +59,35 @@ def mode(s: pd.Series):
     return s.value_counts().index[0]
 
 
-def load_window(weeks: int, src: Path = BTS_PARQUET) -> tuple[pd.DataFrame, str]:
-    months = allowed_months(src)
+def load_window(weeks: int, src: Path = BTS_PARQUET, extra_src: Path = None) -> tuple[pd.DataFrame, str]:
+    """`extra_src` is for scripts/refresh_schedule.py only: a second folder of month parquets that may hold months
+    from the holdout on. The refresh script passes it only after the B5.1 holdout has been scored. Without it,
+    holdout months are never read."""
+    months = [(m, src) for m in allowed_months(src)]
+    if extra_src is not None:
+        have = {m for m, _ in months}
+        months += [(p.stem, extra_src) for p in sorted(extra_src.glob("????-??.parquet"))
+                   if holdout.is_month(p.stem) and p.stem not in have]
+        months.sort()
     if not months:
         raise SystemExit(f"no BTS months before {holdout.LOCKED_FROM} in {src}")
-    as_of = months[-1]
+    as_of = months[-1][0]
     need = max(2, weeks // 4 + 1)
     frames = []
-    for ym in months[-need:]:
-        assert not holdout.is_locked_month(ym), ym
-        frames.append(pd.read_parquet(src / f"{ym}.parquet", columns=COLS))
+    for ym, d in months[-need:]:
+        assert d is not src or not holdout.is_locked_month(ym), ym
+        frames.append(pd.read_parquet(d / f"{ym}.parquet", columns=COLS))
     df = pd.concat(frames, ignore_index=True)
-    df = df[df["FlightDate"] < holdout.LOCKED_FROM_TS]
+    if extra_src is None:
+        df = df[df["FlightDate"] < holdout.LOCKED_FROM_TS]
     end = df["FlightDate"].max()
     df = df[df["FlightDate"] > end - pd.Timedelta(days=7 * weeks)]
     return df, as_of
 
 
 def build(df: pd.DataFrame, as_of: str) -> pd.DataFrame:
+    # Spirit (NK) has ceased operating: its flights are not usable alternatives
+    df = df[(df["Marketing_Airline_Network"] != "NK") & (df["Reporting_Airline"] != "NK")]
     df = df[df["CRSDepTime"].notna() & df["CRSArrTime"].notna() & df["Marketing_Airline_Network"].notna()
             & df["Flight_Number_Marketing_Airline"].notna() & (df["Cancelled"].fillna(0) == 0)]
     d = pd.DataFrame({
@@ -110,7 +121,7 @@ def main():
     ap.add_argument("--weeks", type=int, default=8)
     ap.add_argument("--out", type=Path, default=OUT)
     a = ap.parse_args()
-    df, as_of = load_window(a.weeks)
+    df, as_of = load_window(a.weeks)   # holdout months are never read here; refresh_schedule.py passes extra_src
     start, end = df["FlightDate"].min().date(), df["FlightDate"].max().date()
     out = build(df, as_of)
     _write(out, a.out)   # fixed gzip mtime: the same data gives the same bytes
