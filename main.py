@@ -146,7 +146,7 @@ app.add_middleware(
 )
 
 import feedback  # noqa: E402
-app.include_router(feedback.router)
+feedback.mount(app)
 
 # =============================================================================
 # Usage Logging

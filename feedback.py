@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 import admin_auth
@@ -30,8 +30,6 @@ logger = logging.getLogger("flyrely.feedback")
 RATE_LIMIT = 10
 RATE_WINDOW_S = 3600
 MAX_CONTEXT_BYTES = 8000
-
-router = APIRouter()
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS feedback (
@@ -121,7 +119,6 @@ def _notify(email: str, message: str) -> None:
         logger.warning("ntfy notification failed: %s: %s", type(e).__name__, e)
 
 
-@router.post("/feedback", status_code=201)
 async def post_feedback(body: FeedbackIn, background: BackgroundTasks, email: str = Depends(require_user)):
     message = body.message.strip()
     if not message:
@@ -144,7 +141,6 @@ async def post_feedback(body: FeedbackIn, background: BackgroundTasks, email: st
     return {"id": fid, "status": "received"}
 
 
-@router.get("/feedback")
 async def list_feedback(limit: int = Query(default=100, ge=1, le=500), _admin: str = Depends(admin_auth.require_admin)):
     with closing(_connect()) as conn:
         rows = conn.execute("SELECT * FROM feedback ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
@@ -154,3 +150,9 @@ async def list_feedback(limit: int = Query(default=100, ge=1, le=500), _admin: s
         d["context"] = json.loads(d.pop("context_json")) if d["context_json"] else None
         items.append(d)
     return {"count": len(items), "items": items}
+
+
+def mount(app: FastAPI) -> None:
+    """Register the routes directly on `app` (not via include_router, so app.routes stays a flat list of paths)."""
+    app.add_api_route("/feedback", post_feedback, methods=["POST"], status_code=201)
+    app.add_api_route("/feedback", list_feedback, methods=["GET"])
