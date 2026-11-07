@@ -114,11 +114,14 @@ def lookup_flight(request: Request,
                      "Flight numbers can differ after the switch; check your booking.")
     if not legs:
         any_day = [f for d in range(7) for f in sched.flights_by_number(searched, number, day + timedelta(days=d))]
-        why = (f"{searched}{number} is in the schedule, but not usually on that weekday." if any_day else
-               f"We could not find {code}{number} in the typical schedule.")
+        if any_day:
+            message = (f"{searched}{number} is in the schedule, but not usually on that weekday. "
+                       "Check the flight number and date, or enter the details manually.")
+        else:
+            message = NOT_FOUND_MESSAGE
         raise HTTPException(status_code=404, detail={
             "reason": "not_found",
-            "message": f"{why} Check the flight number and date, or enter the details manually.",
+            "message": message,
             "schedule_as_of": sched.schedule_as_of()})
 
     as_of = sched.schedule_as_of()
@@ -136,6 +139,9 @@ def lookup_flight(request: Request,
         "note": " ".join(notes),
     }
 
+
+NOT_FOUND_MESSAGE = ("We couldn't find this flight. FlyRely currently covers US domestic flights only. "
+                     "If it's a domestic flight, you can enter the details manually.")
 
 _IATA_RE = re.compile(r"^[A-Z]{3}$")
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -157,8 +163,10 @@ def _check_date(date: str) -> date_cls:
     return day
 
 
-def make_search(score_many, scored_airlines, unavailable):
-    """Build the /flights/search handler. `score_many([(origin, dest, dep_dt, airline)]) -> [(prob, risk)]`."""
+def make_search(score_many, scored_airlines, unavailable, known_airports=None, factors_for=None):
+    """Build the /flights/search handler. `score_many([(origin, dest, dep_dt, airline)]) -> [(prob, risk)]`.
+    `known_airports`: US airport codes FlyRely covers (None = no check). `factors_for(origin, dest, dep_dt, airline)`
+    returns plain-language reasons for a row."""
 
     def search_flights(request: Request,
                        origin: str = Query(..., max_length=3), dest: str = Query(..., max_length=3),
@@ -175,6 +183,13 @@ def make_search(score_many, scored_airlines, unavailable):
             if v and not _HHMM_RE.match(v):
                 raise _invalid(f"{name} must look like 06:30")
         day = _check_date(date)
+        if known_airports is not None:
+            unknown = [c for c in (o, d) if c not in known_airports]
+            if unknown:
+                raise HTTPException(status_code=404, detail={
+                    "reason": "unknown_airport",
+                    "message": f"We don't recognise {' or '.join(unknown)}. FlyRely currently covers US "
+                               "domestic flights only, so check the airport codes."})
 
         sched = get_schedule()
         legs = sched.flights_on(o, d, day)
@@ -207,6 +222,10 @@ def make_search(score_many, scored_airlines, unavailable):
                         "airline_name": codeshare.OPERATOR_NAMES.get(f.marketing_airline, f.marketing_airline),
                         "flight_number": f.flight_number[len(f.marketing_airline):],
                         "delay_probability": round(prob, 3), "risk_level": risk})
+            if factors_for is not None:
+                model_airline = f.operating_airline if f.operating_airline in scored_airlines else f.marketing_airline
+                row["risk_factors"] = factors_for(o, d, datetime.fromisoformat(f"{day.isoformat()}T{f.dep_time}:00"),
+                                                  model_airline)
             flights.append(row)
         return {
             "origin": o, "dest": d, "date": day.isoformat(), "flights": flights,
@@ -218,8 +237,10 @@ def make_search(score_many, scored_airlines, unavailable):
     return search_flights
 
 
-def mount(app, score_many=None, scored_airlines=(), unavailable=Exception) -> None:
+def mount(app, score_many=None, scored_airlines=(), unavailable=Exception, known_airports=None,
+          factors_for=None) -> None:
     app.add_api_route("/flights/lookup", lookup_flight, methods=["GET"], tags=["flights"])
     if score_many is not None:
-        app.add_api_route("/flights/search", make_search(score_many, set(scored_airlines), unavailable), methods=["GET"],
+        app.add_api_route("/flights/search", make_search(score_many, set(scored_airlines), unavailable, known_airports, factors_for),
+                          methods=["GET"],
                           tags=["flights"])

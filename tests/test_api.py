@@ -124,10 +124,10 @@ def test_mainline_flight_has_itself_as_operator():
     assert not body["warnings"]
 
 
-def test_unknown_airport_is_flagged():
+def test_unknown_airport_is_rejected():
     r = client.post("/predict", json={**CANONICAL_REQUEST, "destination": "XYZ"})
-    assert r.status_code == 200
-    assert any("XYZ" in w for w in r.json()["warnings"])
+    assert r.status_code == 422
+    assert "XYZ" in r.json()["detail"]["message"]
 
 
 def test_model_missing_returns_503_not_a_fake_number(monkeypatch):
