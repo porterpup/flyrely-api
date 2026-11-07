@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>linkage.extract</string>
+        <string>--interval</string>
+        <string>60</string>
+        <string>--log-file</string>
+        <string>__LOG_DIR__/linkage-extract.log</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FLYRELY_ENV_FILE</key>
+        <string>__ENV_FILE__</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Plain KeepAlive: restart whenever the process dies. Restarts are safe: every write is an idempotent
+         upsert and processed line counts are kept in the store. -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/linkage-extract.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/linkage-extract.stderr.log</string>
+</dict>
+</plist>
