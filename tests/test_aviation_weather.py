@@ -238,3 +238,22 @@ def test_weather_times_use_origin_timezone():
 def test_usage_note_free_provider(monkeypatch):
     svc = main.WeatherService("")
     assert svc.cost_per_call == 0
+
+
+def test_clear_sky_from_metar_cover_when_no_cloud_layers():
+    w = aw.compose_weather(METARS["KLAX"], None, None)  # KLAX: "clouds": [], "cover": "CLR"
+    assert w["conditions"] == "clear"
+
+
+def test_timeout_retries_once_then_cools_down():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        raise httpx.ReadTimeout("slow")
+
+    c = aw.AviationWeatherClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert asyncio.run(c.get_many([("KJFK", None)])) == [None]
+    assert len(calls) == 4  # metar and taf: 2 attempts each
+    assert asyncio.run(c.get_many([("KJFK", None)])) == [None]
+    assert len(calls) == 4  # cooling down: no new requests
