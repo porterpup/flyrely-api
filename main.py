@@ -5,8 +5,8 @@ FastAPI backend for predicting flight delay risk.
 
 The delay and severity models are GradientBoosting classifiers trained on
 BTS On-Time data (2024-2025) over 18 schedule/route features. They do not
-use weather. Weather (when a key is configured) only adds human-readable
-risk factors, and the response says whether it was available.
+use weather. Weather (free NOAA aviationweather.gov METAR/TAF by default, or a Tomorrow.io /
+OpenWeatherMap key) only adds human-readable risk factors, and the response says whether it was available.
 
 There is no fallback prediction: if a model is missing or inference fails,
 /predict returns 503 with a machine-readable reason instead of a number.
@@ -19,8 +19,8 @@ API Endpoints:
     GET  /                  - API info
     GET  /health            - Health check
     POST /predict           - Predict delay risk for a flight
-    GET  /usage             - Prediction usage summary
-    GET  /usage/export      - Prediction usage log as CSV
+    GET  /usage             - Prediction usage summary (admin only)
+    GET  /usage/export      - Prediction usage log as CSV (admin only)
 """
 
 import math
@@ -39,13 +39,16 @@ import numpy as np
 import pandas as pd
 import joblib
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 import codeshare
 import prediction_log
+import aviation_weather
+from admin_auth import require_admin
+from flyrely_features import stations  # read-only: ICAO ids for METAR/TAF lookups
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +60,9 @@ logger = logging.getLogger(__name__)
 
 # Weather API configuration (set via environment variables)
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")  # Tomorrow.io or OpenWeatherMap
-WEATHER_API_PROVIDER = os.getenv("WEATHER_API_PROVIDER", "tomorrow")  # "tomorrow" or "openweathermap"
+# "aviationweather" (free NOAA METAR/TAF, no key; default when no key is set), "tomorrow" (default when a key is
+# set) or "openweathermap". "none" turns weather off.
+WEATHER_API_PROVIDER = os.getenv("WEATHER_API_PROVIDER", "")
 
 # Frontend origins allowed to call the API (comma-separated).
 # Localhost dev servers are always allowed; add deployed frontend origins via env.
@@ -79,7 +84,8 @@ MODEL_VERSION = "bts18-gb-calib-v2"
 # Usage log path (JSONL — one JSON record per line)
 USAGE_LOG_PATH = Path(os.getenv("FLYRELY_USAGE_LOG", Path(__file__).parent / "usage_log.jsonl"))
 
-# Weather API cost estimate: Tomorrow.io free tier = 500 calls/day
+# Weather API cost estimate for the keyed providers (Tomorrow.io free tier = 500 calls/day).
+# The default aviationweather.gov provider is free: see WeatherService.cost_per_call.
 WEATHER_COST_PER_CALL = 0.001  # USD
 
 # Airport reference table (coords, names, time zones) built by scripts/build_airports_ref.py
@@ -205,11 +211,15 @@ class FlightRequest(BaseModel):
 
 
 class WeatherData(BaseModel):
-    """Weather conditions at an airport."""
+    """Weather conditions at an airport. The optional fields are only set by the aviationweather provider."""
     temperature_f: float
     wind_speed_mph: float
     visibility_miles: float
     conditions: str
+    source: Optional[str] = Field(None, description="'current' (latest METAR) or 'forecast' (TAF block at departure)")
+    as_of: Optional[str] = Field(None, description="UTC time of the observation, or the time the forecast is for")
+    ceiling_ft: Optional[int] = Field(None, description="Lowest broken/overcast layer in feet, if any")
+    wx: Optional[str] = Field(None, description="Raw weather phenomena, e.g. '-TSRA BR'")
 
 
 class DelaySeverity(BaseModel):
@@ -262,10 +272,17 @@ class PredictionResponse(BaseModel):
 class WeatherService:
     """Service for fetching real-time weather data."""
 
-    def __init__(self, api_key: str, provider: str = "tomorrow"):
+    def __init__(self, api_key: str, provider: str = ""):
         self.api_key = api_key
+        provider = (provider or "").strip().lower()
+        if not provider:
+            provider = "tomorrow" if api_key else "aviationweather"
+        elif provider in ("tomorrow", "openweathermap") and not api_key:
+            provider = "aviationweather"  # a keyed provider without a key: use the free one
         self.provider = provider
         self.client = httpx.AsyncClient(timeout=10.0)
+        self.aviation = aviation_weather.AviationWeatherClient() if provider == "aviationweather" else None
+        self._icao_table = None
         self._cache = {}  # Simple in-memory cache, keyed per airport per hour
         self._calls_day = None  # UTC date the call counter applies to
         self._calls_today = 0
@@ -285,9 +302,34 @@ class WeatherService:
         self._calls_today += 1
         return True
 
+    @property
+    def cost_per_call(self) -> float:
+        """USD per outbound weather call: the NOAA provider is free."""
+        return 0.0 if self.provider in ("aviationweather", "none") else WEATHER_COST_PER_CALL
+
+    def icao(self, airport_code: str) -> str:
+        if self._icao_table is None:
+            self._icao_table = stations.load_table()
+        return stations.icao_for(airport_code, self._icao_table if self._icao_table is not None else None)
+
+    async def get_weather_pair(self, requests: list) -> list:
+        """requests: [(airport_code, when_utc_or_None)] -> one weather dict (or None) each.
+
+        aviationweather batches both airports into one METAR and one TAF request. Never raises."""
+        if self.provider == "aviationweather":
+            try:
+                ids = [(self.icao(code), when) for code, when in requests]
+                return await self.aviation.get_many(ids)
+            except Exception as e:
+                logger.error(f"Weather lookup error: {e}")
+                return [None] * len(requests)
+        if self.provider == "none":
+            return [None] * len(requests)
+        return [await self.get_weather(code) for code, _ in requests]
+
     async def get_weather(self, airport_code: str) -> Optional[dict]:
-        """Get current weather for an airport, or None if unavailable."""
-        if not self.api_key:
+        """Get current weather for an airport from a keyed provider, or None if unavailable."""
+        if self.provider in ("aviationweather", "none") or not self.api_key:
             return None
 
         coords = AIRPORT_COORDS.get(airport_code.upper())
@@ -582,6 +624,7 @@ def get_risk_factors(features: dict, weather_origin: Optional[dict], weather_des
         factors.append("Holiday travel period (high traffic)")
 
     if weather_origin:
+        factors.extend(aviation_weather.weather_risk_factors(weather_origin, "origin"))
         if weather_origin['visibility_miles'] < 3:
             factors.append(f"Low visibility at origin ({weather_origin['visibility_miles']:.1f} mi)")
         if weather_origin['wind_speed_mph'] > 20:
@@ -590,6 +633,7 @@ def get_risk_factors(features: dict, weather_origin: Optional[dict], weather_des
             factors.append(f"Freezing conditions at origin ({weather_origin['temperature_f']:.0f}°F)")
 
     if weather_dest:
+        factors.extend(aviation_weather.weather_risk_factors(weather_dest, "destination"))
         if weather_dest['visibility_miles'] < 3:
             factors.append(f"Low visibility at destination ({weather_dest['visibility_miles']:.1f} mi)")
         if weather_dest['wind_speed_mph'] > 20:
@@ -653,14 +697,15 @@ async def health_check():
         "model_loaded": model_loaded,
         "severity_model_loaded": model_service.severity_model is not None,
         "weather_api_configured": bool(WEATHER_API_KEY),
+        "weather_provider": weather_service.provider,
         "model_version": MODEL_VERSION,
         "timestamp": datetime.now().isoformat(),
     }
 
 
 @app.get("/usage")
-async def get_usage(days: int = Query(default=30, ge=1, le=365)):
-    """Daily prediction counts, weather calls and estimated weather cost for the last `days` days."""
+async def get_usage(days: int = Query(default=30, ge=1, le=365), _admin: str = Depends(require_admin)):
+    """Daily prediction counts, weather calls and estimated weather cost for the last `days` days. Admin only."""
     cutoff = datetime.now() - timedelta(days=days)
     entries = [e for e in usage_logger.read_all() if datetime.fromisoformat(e["ts"]) >= cutoff]
 
@@ -695,18 +740,22 @@ async def get_usage(days: int = Query(default=30, ge=1, le=365)):
         "period_days": days,
         "total_predictions": len(entries),
         "total_weather_calls": total_weather,
-        "estimated_cost_usd": round(total_weather * WEATHER_COST_PER_CALL, 4),
+        "estimated_cost_usd": round(total_weather * weather_service.cost_per_call, 4),
         "avg_predictions_per_day": round(len(entries) / max(days, 1), 1),
         "daily": sorted(daily.values(), key=lambda x: x["date"], reverse=True),
         "top_routes": top_routes,
         "by_risk_level": risk_counts,
-        "note": f"Cost estimate based on ${WEATHER_COST_PER_CALL}/weather API call. Tomorrow.io free tier: 500 calls/day.",
+        "note": (
+            "Weather provider: aviationweather.gov (NOAA), free: $0 per call."
+            if weather_service.cost_per_call == 0 else
+            f"Cost estimate based on ${weather_service.cost_per_call}/weather API call. "
+            "Tomorrow.io free tier: 500 calls/day."),
     }
 
 
 @app.get("/usage/export")
-async def export_usage():
-    """Download all usage logs as a CSV file."""
+async def export_usage(_admin: str = Depends(require_admin)):
+    """Download all usage logs as a CSV file. Admin only."""
     entries = usage_logger.read_all()
     if not entries:
         raise HTTPException(status_code=404, detail="No usage data to export")
@@ -724,6 +773,22 @@ async def export_usage():
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+def _weather_times(origin: str, destination: str, dep_local: datetime):
+    """(departure, arrival) as aware UTC datetimes for the weather lookup, or (None, None) if the origin's time
+    zone is unknown. The request has no scheduled block time, so arrival is departure plus a rough estimate
+    (30 min taxi/approach + great-circle distance at ~450 mph); the response's `as_of` says the exact time used."""
+    tz = (AIRPORTS_REF.get(origin) or {}).get("tz")
+    if not tz:
+        return None, None
+    try:
+        from zoneinfo import ZoneInfo
+        dep_utc = dep_local.replace(tzinfo=ZoneInfo(tz)).astimezone(timezone.utc)
+        block_min = 30 + estimate_distance(origin, destination) / 450 * 60
+        return dep_utc, dep_utc + timedelta(minutes=block_min)
+    except Exception:
+        return None, None
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -769,8 +834,9 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
     delay_severity = model_service.predict_severity(features)
     model_ms = round((time.perf_counter() - start) * 1000)
 
-    weather_origin = await weather_service.get_weather(origin)
-    weather_dest = await weather_service.get_weather(destination)
+    dep_utc, arr_utc = _weather_times(origin, destination, dep_time)
+    weather_origin, weather_dest = await weather_service.get_weather_pair(
+        [(origin, dep_utc), (destination, arr_utc)])
 
     risk_factors = get_risk_factors(features, weather_origin, weather_dest)
     recommendations = get_recommendations(risk_level, risk_factors)
