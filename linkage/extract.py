@@ -374,7 +374,7 @@ class Extractor:
 class FileTail:
     """Incremental reader for one growing .jsonl.zst / .jsonl.gz file."""
 
-    CHUNK = 1 << 20
+    CHUNK = 1 << 16  # compressed bytes per read: bounds the decompressed burst (XML packs 20-50x)
 
     def __init__(self, path: Path, skip_lines: int = 0):
         self.path, self.offset, self.buf = Path(path), 0, b""
@@ -393,17 +393,19 @@ class FileTail:
             self.dobj = zstd.ZstdDecompressor().decompressobj(read_across_frames=True)
 
     def poll(self):
-        """New complete lines since the last poll (already skipping those done before a restart)."""
+        """Generator of the new complete lines since the last poll (those already done before a restart are
+        skipped). Streams chunk by chunk so a large file never sits in memory; `lines_done` counts a line only
+        once it has been handed out."""
         try:
             size = self.path.stat().st_size
         except OSError:
-            return []
+            return
         if self.reread:
-            return self._poll_reread(size)
+            yield from self._poll_reread(size)
+            return
         if size <= self.offset:
-            return []
+            return
         zstd = archive.zstd_module()
-        out = []
         try:
             with open(self.path, "rb") as fh:
                 fh.seek(self.offset)
@@ -416,34 +418,32 @@ class FileTail:
                     if data:
                         self.buf += data
                         *lines, self.buf = self.buf.split(b"\n")
-                        out.extend(lines)
+                        yield from self._count(lines)
         except zstd.ZstdError:
             log.warning("%s: decoder error, falling back to re-read with skip", self.path.name)
             self.reread = True
-            self.skip = self.lines_done  # lines consumed so far; the failed poll returned none
-            return self._poll_reread(size, force=True)
-        return self._count(out)
+            self.skip = self.lines_done  # lines consumed so far
+            yield from self._poll_reread(size, force=True)
 
     def _poll_reread(self, size, force=False):
         """Re-read the whole file; `skip` is the number of lines already consumed."""
         if not force and size <= self.offset:
-            return []
-        lines = list(archive.read_lines(self.path))  # stops cleanly at a torn tail
+            return
         self.offset = size
-        new = lines[self.skip:]
-        self.skip = max(self.skip, len(lines))
-        self.lines_done = self.skip
-        return new
+        n = 0
+        for n, line in enumerate(archive.read_lines(self.path), 1):  # stops cleanly at a torn tail
+            if n > self.skip:
+                self.skip = self.lines_done = n
+                yield line
 
     def _count(self, raw_lines):
-        lines = [ln.decode("utf-8", "replace") for ln in raw_lines]
-        if self.skip:
-            drop = min(self.skip, len(lines))
-            self.skip -= drop
-            self.lines_done += drop
-            lines = lines[drop:]
-        self.lines_done += len(lines)
-        return lines
+        for ln in raw_lines:
+            if self.skip:
+                self.skip -= 1
+                self.lines_done += 1
+                continue
+            self.lines_done += 1
+            yield ln.decode("utf-8", "replace")
 
 
 def day_dirs(root: Path, source: str, days):
