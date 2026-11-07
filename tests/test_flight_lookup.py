@@ -1,6 +1,6 @@
 """GET /flights/lookup on a small fixture schedule (not the real artifact), plus the real artifact's UA648."""
 import gzip
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -148,3 +148,67 @@ def test_real_artifact_ua648_ewr_sfo():
     c = TestClient(main.app)
     body = c.get("/flights/lookup", params={"flight": "UA648", "date": next_weekday(0)}).json()
     assert ("EWR", "SFO") in [(m["origin"], m["dest"]) for m in body["matches"]]
+
+
+# ---- GET /flights/search ----------------------------------------------------
+
+def test_search_route_with_predictions_sorted(client):
+    body = client.get("/flights/search", params={"origin": "jfk", "dest": "LAX", "date": next_weekday(2)}).json()
+    deps = [f["dep_time"] for f in body["flights"]]
+    assert deps == sorted(deps) and len(deps) == 2          # the two DL50 frequencies (Wed)
+    f = body["flights"][0]
+    assert f["flight"] == "DL50" and f["airline"] == "DL" and f["airline_name"] == "Delta Air Lines"
+    assert 0 <= f["delay_probability"] <= 1 and f["risk_level"] in ("low", "medium", "high")
+    assert "Based on recent schedules" in body["note"] and body["schedule_as_of"] == "2026-08"
+
+
+def test_search_codeshare_scored_for_operator(client):
+    body = client.get("/flights/search", params={"origin": "JFK", "dest": "LAX", "date": next_weekday(5)}).json()
+    f = body["flights"][0]
+    assert f["flight"] == "UA900" and f["operating_airline"] == "OO" and f["operating_flight_number"] == "OO5521"
+
+
+def test_search_time_window(client):
+    p = {"origin": "JFK", "dest": "LAX", "date": next_weekday(2)}
+    assert [f["dep_time"] for f in client.get("/flights/search", params={**p, "after": "12:00"}).json()["flights"]] == ["18:15"]
+    assert client.get("/flights/search", params={**p, "before": "06:00"}).status_code == 404
+
+
+def test_search_404_and_validation(client):
+    d = next_weekday(2)
+    assert client.get("/flights/search", params={"origin": "AAA", "dest": "BBB", "date": d}).status_code == 404
+    for bad in ({"origin": "JF", "dest": "LAX"}, {"origin": "JFK", "dest": "JFK"}, {"origin": "J1K", "dest": "LAX"},
+                {"origin": "JFK", "dest": "LAX", "after": "25:00"}, {"origin": "JFK", "dest": "LAX", "date": "x"}):
+        assert client.get("/flights/search", params={"date": d, **bad}).status_code == 422, bad
+
+
+def test_search_one_model_call_and_fast(client, monkeypatch):
+    calls = []
+    real = main.model_service.predict_many
+    monkeypatch.setattr(main.model_service, "predict_many", lambda rows: calls.append(len(rows)) or real(rows))
+    import time as _t
+    t0 = _t.perf_counter()
+    assert client.get("/flights/search", params={"origin": "JFK", "dest": "LAX", "date": next_weekday(2)}).status_code == 200
+    assert calls == [2] and _t.perf_counter() - t0 < 2
+
+
+def test_search_503_when_model_unavailable(client, monkeypatch):
+    monkeypatch.setattr(main.model_service, "model", None)
+    r = client.get("/flights/search", params={"origin": "JFK", "dest": "LAX", "date": next_weekday(2)})
+    assert r.status_code == 503 and r.json()["detail"]["reason"] == "model_unavailable"
+
+
+def test_predict_many_matches_predict():
+    feats = [main.build_features("JFK", "LAX", datetime(2026, 11, 15, h, 0), "AA") for h in (7, 18)]
+    batch = main.model_service.predict_many(feats)
+    single = [main.model_service.predict(f) for f in feats]
+    assert [round(b[0], 9) for b in batch] == [round(s[0], 9) for s in single]
+
+
+def test_real_search_ewr_sfo_30_flights_speed():
+    flight_lookup._schedule = None
+    import time as _t
+    t0 = _t.perf_counter()
+    r = TestClient(main.app).get("/flights/search", params={"origin": "LAX", "dest": "SFO", "date": next_weekday(1)})
+    assert r.status_code == 200 and len(r.json()["flights"]) >= 20
+    assert _t.perf_counter() - t0 < 3

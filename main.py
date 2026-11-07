@@ -147,8 +147,6 @@ app.add_middleware(
 
 import feedback  # noqa: E402
 feedback.mount(app)
-import flight_lookup  # noqa: E402   (imports copilot lazily, so the copilot flag-off sentinel holds)
-flight_lookup.mount(app)
 
 # =============================================================================
 # Usage Logging
@@ -482,6 +480,25 @@ class ModelService:
         except Exception as e:
             raise PredictionUnavailable("prediction_failed", f"{type(e).__name__}: {e}")
         return proba, self._probability_to_risk(proba)
+
+    def predict_many(self, feature_rows: list) -> list:
+        """Batch of predict(): one model call for all rows. Returns [(probability, risk_level), ...]."""
+        if self.model is None:
+            raise PredictionUnavailable("model_unavailable", self.load_error or "model not loaded")
+        if not feature_rows:
+            return []
+        try:
+            missing = [n for n in self.feature_names if any(n not in f for f in feature_rows)]
+            if missing:
+                raise PredictionUnavailable("prediction_failed", f"missing features: {missing}")
+            frame = pd.DataFrame([[f[n] for n in self.feature_names] for f in feature_rows],
+                                 columns=self.feature_names, dtype=float)
+            probas = self.model.predict_proba(frame)[:, 1]
+        except PredictionUnavailable:
+            raise
+        except Exception as e:
+            raise PredictionUnavailable("prediction_failed", f"{type(e).__name__}: {e}")
+        return [(float(p), self._probability_to_risk(float(p))) for p in probas]
 
     def _probability_to_risk(self, prob: float) -> str:
         """Calibration v2 thresholds: Low < 0.20, Medium 0.20–0.30, High >= 0.30"""
@@ -907,6 +924,15 @@ def _copilot_scorer():
         return model_service.predict(build_features(origin, destination, dep_time, airline))
     return score
 
+
+def _score_many(items: list) -> list:
+    """items: [(origin, dest, dep_time, airline)] -> [(probability, risk_level)] in one model call.
+    Like /predict, scores for the operating carrier when FlyRely has history for it. Raises PredictionUnavailable."""
+    return model_service.predict_many([build_features(o, d, t, a) for o, d, t, a in items])
+
+
+import flight_lookup  # noqa: E402   (imports copilot lazily, so the copilot flag-off sentinel holds)
+flight_lookup.mount(app, score_many=_score_many, scored_airlines=AIRLINE_DELAY_RATES, unavailable=PredictionUnavailable)
 
 if os.getenv("FLYRELY_FEATURE_DISRUPTION_COPILOT") == "1":
     from copilot import mount as _copilot_mount

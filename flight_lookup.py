@@ -10,7 +10,7 @@ TODO(live linkage): for a date within ~24h, prefer the live FAA TFMS schedule. T
 import os
 import re
 import threading
-from datetime import date as date_cls, timedelta
+from datetime import date as date_cls, datetime, timedelta
 from typing import Optional
 
 from fastapi import HTTPException, Query, Request
@@ -96,13 +96,9 @@ def lookup_flight(request: Request,
     _rate_limit(request)
     try:
         code, number = parse_query(flight, airline)
-        day = date_cls.fromisoformat(date)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail={"reason": "invalid_input", "message": str(e)})
-    today = date_cls.today()
-    if not (today - timedelta(days=7) <= day <= today + timedelta(days=365)):
-        raise HTTPException(status_code=422, detail={"reason": "invalid_input",
-                                                     "message": "date must be within the next year (or the last week)"})
+        raise _invalid(str(e))
+    day = _check_date(date)
 
     if code in DEFUNCT:
         raise HTTPException(status_code=410, detail={"reason": "airline_defunct", "message": DEFUNCT[code]})
@@ -141,5 +137,89 @@ def lookup_flight(request: Request,
     }
 
 
-def mount(app) -> None:
+_IATA_RE = re.compile(r"^[A-Z]{3}$")
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+MAX_SEARCH_RESULTS = 100
+
+
+def _invalid(message: str):
+    return HTTPException(status_code=422, detail={"reason": "invalid_input", "message": message})
+
+
+def _check_date(date: str) -> date_cls:
+    try:
+        day = date_cls.fromisoformat(date)
+    except ValueError:
+        raise _invalid("date must look like 2026-11-10")
+    today = date_cls.today()
+    if not (today - timedelta(days=7) <= day <= today + timedelta(days=365)):
+        raise _invalid("date must be within the next year (or the last week)")
+    return day
+
+
+def make_search(score_many, scored_airlines, unavailable):
+    """Build the /flights/search handler. `score_many([(origin, dest, dep_dt, airline)]) -> [(prob, risk)]`."""
+
+    def search_flights(request: Request,
+                       origin: str = Query(..., max_length=3), dest: str = Query(..., max_length=3),
+                       date: str = Query(...),
+                       after: Optional[str] = Query(None, description="Earliest local departure, HH:MM"),
+                       before: Optional[str] = Query(None, description="Latest local departure, HH:MM")):
+        _rate_limit(request)
+        o, d = origin.strip().upper(), dest.strip().upper()
+        if not (_IATA_RE.match(o) and _IATA_RE.match(d)):
+            raise _invalid("origin and dest must be 3-letter airport codes such as EWR")
+        if o == d:
+            raise _invalid("origin and dest must differ")
+        for name, v in (("after", after), ("before", before)):
+            if v and not _HHMM_RE.match(v):
+                raise _invalid(f"{name} must look like 06:30")
+        day = _check_date(date)
+
+        sched = get_schedule()
+        legs = sched.flights_on(o, d, day)
+        if after:
+            legs = [f for f in legs if f.dep_time >= after]
+        if before:
+            legs = [f for f in legs if f.dep_time <= before]
+        if not legs:
+            raise HTTPException(status_code=404, detail={
+                "reason": "not_found",
+                "message": f"We found no flights from {o} to {d} on that date in the typical schedule. "
+                           "Check the airports, or enter the details manually.",
+                "schedule_as_of": sched.schedule_as_of()})
+        legs = legs[:MAX_SEARCH_RESULTS]
+
+        items = []
+        for f in legs:
+            model_airline = f.operating_airline if f.operating_airline in scored_airlines else f.marketing_airline
+            items.append((o, d, datetime.fromisoformat(f"{day.isoformat()}T{f.dep_time}:00"), model_airline))
+        try:
+            scores = score_many(items)
+        except unavailable as e:
+            raise HTTPException(status_code=503, detail={"reason": getattr(e, "reason", "prediction_failed"),
+                                                         "message": getattr(e, "message", str(e))})
+        as_of = sched.schedule_as_of()
+        flights = []
+        for f, (prob, risk) in zip(legs, scores):
+            row = _leg(f)
+            row.update({"flight": f.flight_number, "airline": f.marketing_airline,
+                        "airline_name": codeshare.OPERATOR_NAMES.get(f.marketing_airline, f.marketing_airline),
+                        "flight_number": f.flight_number[len(f.marketing_airline):],
+                        "delay_probability": round(prob, 3), "risk_level": risk})
+            flights.append(row)
+        return {
+            "origin": o, "dest": d, "date": day.isoformat(), "flights": flights,
+            "source": SOURCE, "confidence": "typical_schedule", "schedule_as_of": as_of,
+            "note": f"Based on recent schedules (as of {as_of}). Airlines change times seasonally, "
+                    "so confirm the time on your booking.",
+        }
+
+    return search_flights
+
+
+def mount(app, score_many=None, scored_airlines=(), unavailable=Exception) -> None:
     app.add_api_route("/flights/lookup", lookup_flight, methods=["GET"], tags=["flights"])
+    if score_many is not None:
+        app.add_api_route("/flights/search", make_search(score_many, set(scored_airlines), unavailable), methods=["GET"],
+                          tags=["flights"])
