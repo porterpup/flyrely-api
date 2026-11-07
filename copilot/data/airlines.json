@@ -1,0 +1,188 @@
+{
+  "as_of": "2026-11-06",
+  "fields": {
+    "user_note": "text safe to show to end users; the only note field that may reach an API response",
+    "internal_note": "developer-only context; never returned by the API",
+    "manage_booking_url": "https URL of the manage-trip page on the airline's own site, or null if not verified",
+    "phone": "customer-service number in E.164 form, or null if not verified",
+    "phone_display": "same number, US display form",
+    "verified_on": "date phone and URL were both confirmed by direct page read; null otherwise",
+    "sources": "official page(s) the values were taken from",
+    "note": "why a field is null, when it is",
+    "verification": "weakest status of the shown fields (manage_booking_url, phone): verified (page read directly on the official domain) | official_source_unconfirmed (seen on the official domain only via search result, page not read) | unknown (nothing shown). lookup() returns an entry when it has a URL and phone and status is verified or official_source_unconfirmed.",
+    "other_channels": "official-domain chat URL, text line, or X handle; recorded for a future messaging agent, nothing consumes it yet",
+    "status_url": "official status/help page when no phone exists"
+  },
+  "airlines": {
+    "DL": {
+      "name": "Delta Air Lines",
+      "manage_booking_url": "https://www.delta.com/mytrips/",
+      "phone": "+1-800-221-1212",
+      "phone_display": "800-221-1212",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.delta.com/us/en/need-help/overview",
+        "https://www.delta.com/us/en/need-help/support-flights",
+        "https://www.delta.com/us/en/manage-trips/overview (404 page; links to /mytrips/)"
+      ],
+      "note": null,
+      "verification": "verified",
+      "other_channels": {}
+    },
+    "WN": {
+      "name": "Southwest Airlines",
+      "manage_booking_url": "https://www.southwest.com/air/manage-reservation/",
+      "phone": "+1-800-435-9792",
+      "phone_display": "800-435-9792",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.southwest.com/air/manage-reservation/",
+        "https://support.southwest.com/helpcenter/article/More-phone-numbers-contact-options"
+      ],
+      "note": null,
+      "verification": "verified",
+      "other_channels": {}
+    },
+    "AS": {
+      "name": "Alaska Airlines",
+      "manage_booking_url": "https://www.alaskaair.com/booking/reservation-lookup",
+      "phone": "+1-800-252-7522",
+      "phone_display": "800-252-7522",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.alaskaair.com/content/about-us/help-contact/contact-us",
+        "https://www.alaskaair.com/booking/reservation-lookup"
+      ],
+      "note": null,
+      "verification": "verified",
+      "other_channels": {}
+    },
+    "F9": {
+      "name": "Frontier Airlines",
+      "manage_booking_url": "https://www.flyfrontier.com/travel/my-trips/manage-trip/",
+      "phone": "+1-602-333-5925",
+      "phone_display": "602-333-5925",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://faq.flyfrontier.com/help/how-do-i-contact-frontier-airlines",
+        "https://www.flyfrontier.com/travel/my-trips/manage-trip/"
+      ],
+      "note": null,
+      "verification": "verified",
+      "other_channels": {}
+    },
+    "HA": {
+      "name": "Hawaiian Airlines",
+      "manage_booking_url": "https://www.hawaiianairlines.com/mytrips",
+      "phone": "+1-800-367-5320",
+      "phone_display": "800-367-5320",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www2.hawaiianairlines.com/contact-us/call",
+        "https://www.hawaiianairlines.com/mytrips"
+      ],
+      "note": "An older Hawaiian Manage Trip page lists +1-800-713-1220; treated as stale.",
+      "verification": "verified",
+      "other_channels": {}
+    },
+    "AA": {
+      "name": "American Airlines",
+      "manage_booking_url": "https://www.aa.com/reservation/view/find-your-reservation",
+      "phone": "+1-800-433-7300",
+      "phone_display": "800-433-7300",
+      "verified_on": null,
+      "sources": [
+        "https://www.aa.com/web/i18n/customer-service/contact-american/reservations-and-ticket-changes.html (phone, via search result; direct fetch 403)",
+        "https://www.aa.com/reservation/view/find-your-reservation (manage URL, via search result; direct fetch 403)"
+      ],
+      "note": "aa.com returns 403 to automated fetches; both values seen only in search results on aa.com. Verify by hand before launch.",
+      "verification": "official_source_unconfirmed",
+      "other_channels": {}
+    },
+    "UA": {
+      "name": "United Airlines",
+      "manage_booking_url": "https://www.united.com/en/us/manageres/mytrips",
+      "phone": "+1-800-864-8331",
+      "phone_display": "800-864-8331",
+      "verified_on": null,
+      "sources": [
+        "https://www.united.com/en/us/manageres/mytrips (manage URL, via search result; fetch timed out)",
+        "https://cloud.enews.united.com/text-messaging-terms.html (1-800-UNITED-1 listed, in context of MileagePlus and alerts)",
+        "https://www.united.com/en/us/fly/help-center.html (text line, via search result; fetch timed out)"
+      ],
+      "note": "united.com fetches time out. 1-800-UNITED-1 is listed on united.com but not on a page labelled reservations-specific. Verify by hand before launch.",
+      "verification": "official_source_unconfirmed",
+      "other_channels": {
+        "text": "Text UNITED to 32050 (per united.com help center, via search result)"
+      }
+    },
+    "B6": {
+      "name": "JetBlue Airways",
+      "manage_booking_url": "https://www.jetblue.com/manage-trips",
+      "phone": "+1-800-538-2583",
+      "phone_display": "800-538-2583",
+      "verified_on": null,
+      "sources": [
+        "https://www.jetblue.com/help/help-with-booking-a-flight (manage URL, chat URL, X link; read directly)",
+        "https://www.jetblue.com/at-the-airport/accessibility-assistance/intellectual-developmental-cognitive-disabilities (1-800-JETBLUE (538-2583), via search result)",
+        "https://www.jetblue.com/contact-us (lists phone as a contact option; number not in fetched text)"
+      ],
+      "note": "Manage URL, chat and X read directly. Phone 1-800-JETBLUE (538-2583) seen only via search result; 1-888-538-2583 is the groups desk, 1-800-336-5530 is TTY. Verify by hand before launch.",
+      "verification": "official_source_unconfirmed",
+      "other_channels": {
+        "chat": "https://www.jetblue.com/manage-trips/contact-us/chat",
+        "x": "@jetblue"
+      }
+    },
+    "G4": {
+      "name": "Allegiant Air",
+      "manage_booking_url": "https://www.allegiantair.com/manage-travel",
+      "phone": "+1-702-505-8888",
+      "phone_display": "702-505-8888",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://www.allegiantair.com/contactus2 (Reservations Center/Customer Care: (702) 505-8888; read directly)",
+        "https://www.allegiantair.com/contactus (text line +1 866-432-6165, AVA chat, @allegiant; read directly)",
+        "https://www.allegiantair.com/manage-travel"
+      ],
+      "note": "Voice line is the Reservations Center/Customer Care number; +1 866-432-6165 is text only. Contact page warns of 30+ minute waits.",
+      "verification": "verified",
+      "other_channels": {
+        "chat": "AVA virtual assistant on https://www.allegiantair.com/contactus",
+        "text": "+1-866-432-6165 (text only)",
+        "x": "@allegiant"
+      }
+    },
+    "SY": {
+      "name": "Sun Country Airlines",
+      "manage_booking_url": "https://suncountry.com/?page=mytrips",
+      "phone": "+1-651-905-2737",
+      "phone_display": "651-905-2737",
+      "verified_on": "2026-11-06",
+      "sources": [
+        "https://suncountry.com/flights/en/ (reservations 651-905-2737 in booking FAQ; Manage Trip link https://suncountry.com/?page=mytrips; footer x.com/suncountryair; read directly)",
+        "https://stories.suncountry.com/merger-faqs (continue to contact Sun Country Reservations / Manage Trip)"
+      ],
+      "note": "Sun Country is being acquired by Allegiant; number and URL may change after integration.",
+      "verification": "verified",
+      "other_channels": {
+        "x": "@suncountryair"
+      }
+    },
+    "NK": {
+      "name": "Spirit Airlines",
+      "manage_booking_url": null,
+      "phone": null,
+      "phone_display": null,
+      "verified_on": null,
+      "sources": [
+        "https://customersupport.spirit.com/en-us/category/article/KA-01219 (via search result; host did not resolve from this machine)"
+      ],
+      "user_note": "Spirit Airlines has stopped flying and no longer runs a customer call center. Refund questions are handled by a third-party claims agent; see Spirit's support page.",
+      "internal_note": "Spirit's support page says an orderly wind-down began 2026-05-02, all flights cancelled, and no customer call center or email remains. Refund questions go to a third-party claims agent. No phone is published; do not show one. DEVELOPER ONLY, never send to clients.",
+      "verification": "unknown",
+      "other_channels": {},
+      "status_url": "https://customersupport.spirit.com/en-us/category/article/KA-01219"
+    }
+  }
+}
