@@ -1,0 +1,524 @@
+{
+  "plan": "backtest/PLAN_L1_LIVE_TAIL_LINKAGE.md T4",
+  "eval_months": [
+    "2026-01",
+    "2026-08"
+  ],
+  "history_from": "2025-12",
+  "n_eval_flights": 5227724,
+  "n_eval_with_true_inbound": 4873215,
+  "type_filter": "not measurable on BTS (no aircraft type column); all precisions are without it",
+  "m1_share_scenarios": {
+    "0": 0.0,
+    "0.10": 0.1,
+    "0.65": 0.65
+  },
+  "seed": 42,
+  "chain_length": {
+    "3h": {
+      "all": {
+        "n": 5227724,
+        "share": {
+          "no_tail": 0.0037,
+          "no_leg": 0.0367,
+          "1": 0.6111,
+          "2": 0.337,
+          "3": 0.0105,
+          "4": 0.0009,
+          "5+": 0.0001
+        },
+        "mean_links_when_linked": 1.376
+      },
+      "mainline": {
+        "n": 3524776,
+        "share": {
+          "no_tail": 0.0032,
+          "no_leg": 0.0427,
+          "1": 0.7002,
+          "2": 0.2448,
+          "3": 0.0083,
+          "4": 0.0007,
+          "5+": 0.0
+        },
+        "mean_links_when_linked": 1.276
+      },
+      "regional": {
+        "n": 1702948,
+        "share": {
+          "no_tail": 0.0047,
+          "no_leg": 0.0243,
+          "1": 0.4267,
+          "2": 0.5278,
+          "3": 0.0152,
+          "4": 0.0013,
+          "5+": 0.0001
+        },
+        "mean_links_when_linked": 1.579
+      }
+    },
+    "1h": {
+      "all": {
+        "n": 5227724,
+        "share": {
+          "no_tail": 0.0037,
+          "no_leg": 0.0348,
+          "1": 0.9526,
+          "2": 0.0088,
+          "3": 0.0001,
+          "4": 0.0,
+          "5+": 0.0
+        },
+        "mean_links_when_linked": 1.009
+      },
+      "mainline": {
+        "n": 3524776,
+        "share": {
+          "no_tail": 0.0032,
+          "no_leg": 0.0433,
+          "1": 0.9468,
+          "2": 0.0067,
+          "3": 0.0001,
+          "4": 0.0,
+          "5+": 0.0
+        },
+        "mean_links_when_linked": 1.007
+      },
+      "regional": {
+        "n": 1702948,
+        "share": {
+          "no_tail": 0.0047,
+          "no_leg": 0.0173,
+          "1": 0.9646,
+          "2": 0.0133,
+          "3": 0.0001,
+          "4": 0.0,
+          "5+": 0.0
+        },
+        "mean_links_when_linked": 1.014
+      }
+    }
+  },
+  "m2": {
+    "definition": "same reporting carrier + flight number arrives at B's origin, sched OUT within 18 h before B, sched IN <= B's sched OUT, latest such leg; precision = candidate is B's true immediate inbound (precision_same_tail: candidate has B's tail)",
+    "overall": {
+      "n": 5227724,
+      "coverage": 0.1757,
+      "precision": 0.776,
+      "precision_same_tail": 0.7907,
+      "precision_given_pairing": 0.8149,
+      "n_candidates": 918625,
+      "hit_over_all": 0.1364,
+      "through_share_of_true_pairs": 0.1463
+    },
+    "mainline": {
+      "n": 3524776,
+      "coverage": 0.168,
+      "precision": 0.7015,
+      "precision_same_tail": 0.7124,
+      "precision_given_pairing": 0.7389,
+      "n_candidates": 592121,
+      "hit_over_all": 0.1178
+    },
+    "regional": {
+      "n": 1702948,
+      "coverage": 0.1917,
+      "precision": 0.9111,
+      "precision_same_tail": 0.9329,
+      "precision_given_pairing": 0.9515,
+      "n_candidates": 326504,
+      "hit_over_all": 0.1747
+    },
+    "by_carrier": {
+      "WN": {
+        "n": 927832,
+        "coverage": 0.1578,
+        "precision": 0.8884,
+        "precision_same_tail": 0.8943,
+        "precision_given_pairing": 0.9052,
+        "n_candidates": 146444,
+        "hit_over_all": 0.1402
+      },
+      "DL": {
+        "n": 694931,
+        "coverage": 0.2326,
+        "precision": 0.9355,
+        "precision_same_tail": 0.9509,
+        "precision_given_pairing": 0.9606,
+        "n_candidates": 161662,
+        "hit_over_all": 0.2176
+      },
+      "AA": {
+        "n": 667418,
+        "coverage": 0.1988,
+        "precision": 0.8898,
+        "precision_same_tail": 0.9119,
+        "precision_given_pairing": 0.9366,
+        "n_candidates": 132707,
+        "hit_over_all": 0.1769
+      },
+      "OO": {
+        "n": 576892,
+        "coverage": 0.1638,
+        "precision": 0.8933,
+        "precision_same_tail": 0.9143,
+        "precision_given_pairing": 0.9215,
+        "n_candidates": 94520,
+        "hit_over_all": 0.1464
+      },
+      "UA": {
+        "n": 559304,
+        "coverage": 0.2462,
+        "precision": 0.0272,
+        "precision_same_tail": 0.0273,
+        "precision_given_pairing": 0.0308,
+        "n_candidates": 137698,
+        "hit_over_all": 0.0067
+      },
+      "YX": {
+        "n": 246436,
+        "coverage": 0.1793,
+        "precision": 0.8468,
+        "precision_same_tail": 0.8654,
+        "precision_given_pairing": 0.9,
+        "n_candidates": 44178,
+        "hit_over_all": 0.1518
+      },
+      "AS": {
+        "n": 227606,
+        "coverage": 0.0584,
+        "precision": 0.9042,
+        "precision_same_tail": 0.9157,
+        "precision_given_pairing": 0.9222,
+        "n_candidates": 13300,
+        "hit_over_all": 0.0528
+      },
+      "MQ": {
+        "n": 217727,
+        "coverage": 0.2788,
+        "precision": 0.9601,
+        "precision_same_tail": 0.9757,
+        "precision_given_pairing": 0.9945,
+        "n_candidates": 60695,
+        "hit_over_all": 0.2677
+      },
+      "9E": {
+        "n": 171357,
+        "coverage": 0.2505,
+        "precision": 0.9571,
+        "precision_same_tail": 0.9825,
+        "precision_given_pairing": 0.9956,
+        "n_candidates": 42932,
+        "hit_over_all": 0.2398
+      },
+      "B6": {
+        "n": 165621,
+        "coverage": 0.001,
+        "precision": 0.9634,
+        "precision_same_tail": 0.9756,
+        "precision_given_pairing": 0.9814,
+        "n_candidates": 164,
+        "hit_over_all": 0.001
+      },
+      "OH": {
+        "n": 163028,
+        "coverage": 0.2763,
+        "precision": 0.9163,
+        "precision_same_tail": 0.951,
+        "precision_given_pairing": 0.9823,
+        "n_candidates": 45045,
+        "hit_over_all": 0.2532
+      },
+      "F9": {
+        "n": 147420,
+        "coverage": 0.0,
+        "precision": 0.0,
+        "precision_same_tail": 0.0,
+        "precision_given_pairing": null,
+        "n_candidates": 1,
+        "hit_over_all": 0.0
+      },
+      "PT": {
+        "n": 102547,
+        "coverage": 0.32,
+        "precision": 0.9534,
+        "precision_same_tail": 0.9734,
+        "precision_given_pairing": 0.9919,
+        "n_candidates": 32812,
+        "hit_over_all": 0.3051
+      },
+      "G4": {
+        "n": 87442,
+        "coverage": 0.0016,
+        "precision": 0.0417,
+        "precision_same_tail": 0.1042,
+        "precision_given_pairing": 0.0545,
+        "n_candidates": 144,
+        "hit_over_all": 0.0001
+      },
+      "QX": {
+        "n": 63406,
+        "coverage": 0.0554,
+        "precision": 0.9878,
+        "precision_same_tail": 0.9946,
+        "precision_given_pairing": 0.9948,
+        "n_candidates": 3514,
+        "hit_over_all": 0.0547
+      },
+      "G7": {
+        "n": 58748,
+        "coverage": 0.0397,
+        "precision": 0.0965,
+        "precision_same_tail": 0.1017,
+        "precision_given_pairing": 0.1058,
+        "n_candidates": 2331,
+        "hit_over_all": 0.0038
+      },
+      "C5": {
+        "n": 55353,
+        "coverage": 0.0044,
+        "precision": 0.07,
+        "precision_same_tail": 0.0947,
+        "precision_given_pairing": 0.0776,
+        "n_candidates": 243,
+        "hit_over_all": 0.0003
+      },
+      "YV": {
+        "n": 47454,
+        "coverage": 0.0049,
+        "precision": 0.0128,
+        "precision_same_tail": 0.0128,
+        "precision_given_pairing": 0.0145,
+        "n_candidates": 234,
+        "hit_over_all": 0.0001
+      },
+      "NK": {
+        "n": 47202,
+        "coverage": 0.0,
+        "precision": 0.0,
+        "precision_same_tail": 0.0,
+        "precision_given_pairing": 0.0,
+        "n_candidates": 1,
+        "hit_over_all": 0.0
+      }
+    },
+    "with_exclusion": {
+      "0": {
+        "n": 5227724,
+        "coverage": 0.1757,
+        "precision": 0.776,
+        "precision_same_tail": 0.7907,
+        "precision_given_pairing": 0.8149,
+        "n_candidates": 918625,
+        "hit_over_all": 0.1364
+      },
+      "0.10": {
+        "n": 4705572,
+        "coverage": 0.1727,
+        "precision": 0.79,
+        "precision_same_tail": 0.8049,
+        "precision_given_pairing": 0.8286,
+        "n_candidates": 812428,
+        "hit_over_all": 0.1364
+      },
+      "0.65": {
+        "n": 1829743,
+        "coverage": 0.1557,
+        "precision": 0.8765,
+        "precision_same_tail": 0.893,
+        "precision_given_pairing": 0.9123,
+        "n_candidates": 284913,
+        "hit_over_all": 0.1365
+      }
+    }
+  },
+  "m3": {
+    "l0_baseline_reported": 0.574,
+    "l0_reproduced_fn_match_given_exists": 0.574,
+    "definition": "candidate = the leg flying today's d-7 inbound flight number into B's origin (else d-1), scheduled within 18 h before B; precision = candidate is B's true immediate inbound (row identity, stricter than the L0 flight-number match)",
+    "scenarios": {
+      "0": {
+        "d-7": {
+          "overall": {
+            "n": 5227724,
+            "coverage": 0.7791,
+            "precision": 0.57,
+            "precision_same_tail": 0.5787,
+            "precision_given_pairing": 0.6031,
+            "n_candidates": 4072881,
+            "hit_over_all": 0.444
+          },
+          "mainline": {
+            "n": 3524776,
+            "coverage": 0.7719,
+            "precision": 0.5656,
+            "precision_same_tail": 0.5726,
+            "precision_given_pairing": 0.5998,
+            "n_candidates": 2720880,
+            "hit_over_all": 0.4366
+          },
+          "regional": {
+            "n": 1702948,
+            "coverage": 0.7939,
+            "precision": 0.5787,
+            "precision_same_tail": 0.591,
+            "precision_given_pairing": 0.6096,
+            "n_candidates": 1352001,
+            "hit_over_all": 0.4595
+          }
+        },
+        "d-7_else_d-1": {
+          "overall": {
+            "n": 5227724,
+            "coverage": 0.9096,
+            "precision": 0.5553,
+            "precision_same_tail": 0.564,
+            "precision_given_pairing": 0.5899,
+            "n_candidates": 4755169,
+            "hit_over_all": 0.5051
+          },
+          "mainline": {
+            "n": 3524776,
+            "coverage": 0.8958,
+            "precision": 0.5472,
+            "precision_same_tail": 0.5541,
+            "precision_given_pairing": 0.5834,
+            "n_candidates": 3157419,
+            "hit_over_all": 0.4902
+          },
+          "regional": {
+            "n": 1702948,
+            "coverage": 0.9382,
+            "precision": 0.5713,
+            "precision_same_tail": 0.5836,
+            "precision_given_pairing": 0.6026,
+            "n_candidates": 1597750,
+            "hit_over_all": 0.536
+          }
+        },
+        "share_of_d7_candidates_removed": 0.0
+      },
+      "0.10": {
+        "d-7": {
+          "overall": {
+            "n": 4705572,
+            "coverage": 0.7499,
+            "precision": 0.5922,
+            "precision_same_tail": 0.6011,
+            "precision_given_pairing": 0.6258,
+            "n_candidates": 3528483,
+            "hit_over_all": 0.444
+          },
+          "mainline": {
+            "n": 3172732,
+            "coverage": 0.7427,
+            "precision": 0.5878,
+            "precision_same_tail": 0.595,
+            "precision_given_pairing": 0.6224,
+            "n_candidates": 2356532,
+            "hit_over_all": 0.4366
+          },
+          "regional": {
+            "n": 1532840,
+            "coverage": 0.7646,
+            "precision": 0.6009,
+            "precision_same_tail": 0.6134,
+            "precision_given_pairing": 0.6326,
+            "n_candidates": 1171951,
+            "hit_over_all": 0.4594
+          }
+        },
+        "d-7_else_d-1": {
+          "overall": {
+            "n": 4705572,
+            "coverage": 0.8915,
+            "precision": 0.5717,
+            "precision_same_tail": 0.5804,
+            "precision_given_pairing": 0.6066,
+            "n_candidates": 4195004,
+            "hit_over_all": 0.5096
+          },
+          "mainline": {
+            "n": 3172732,
+            "coverage": 0.8771,
+            "precision": 0.5639,
+            "precision_same_tail": 0.5708,
+            "precision_given_pairing": 0.6003,
+            "n_candidates": 2782887,
+            "hit_over_all": 0.4946
+          },
+          "regional": {
+            "n": 1532840,
+            "coverage": 0.9212,
+            "precision": 0.5871,
+            "precision_same_tail": 0.5995,
+            "precision_given_pairing": 0.6189,
+            "n_candidates": 1412117,
+            "hit_over_all": 0.5408
+          }
+        },
+        "share_of_d7_candidates_removed": 0.0375
+      },
+      "0.65": {
+        "d-7": {
+          "overall": {
+            "n": 1829743,
+            "coverage": 0.5895,
+            "precision": 0.754,
+            "precision_same_tail": 0.7642,
+            "precision_given_pairing": 0.7889,
+            "n_candidates": 1078574,
+            "hit_over_all": 0.4445
+          },
+          "mainline": {
+            "n": 1233287,
+            "coverage": 0.5829,
+            "precision": 0.7496,
+            "precision_same_tail": 0.7578,
+            "precision_given_pairing": 0.784,
+            "n_candidates": 718853,
+            "hit_over_all": 0.4369
+          },
+          "regional": {
+            "n": 596456,
+            "coverage": 0.6031,
+            "precision": 0.7629,
+            "precision_same_tail": 0.7772,
+            "precision_given_pairing": 0.7988,
+            "n_candidates": 359721,
+            "hit_over_all": 0.4601
+          }
+        },
+        "d-7_else_d-1": {
+          "overall": {
+            "n": 1829743,
+            "coverage": 0.7465,
+            "precision": 0.7158,
+            "precision_same_tail": 0.7255,
+            "precision_given_pairing": 0.7521,
+            "n_candidates": 1365928,
+            "hit_over_all": 0.5344
+          },
+          "mainline": {
+            "n": 1233287,
+            "coverage": 0.7313,
+            "precision": 0.7088,
+            "precision_same_tail": 0.7164,
+            "precision_given_pairing": 0.7455,
+            "n_candidates": 901858,
+            "hit_over_all": 0.5183
+          },
+          "regional": {
+            "n": 596456,
+            "coverage": 0.778,
+            "precision": 0.7296,
+            "precision_same_tail": 0.7432,
+            "precision_given_pairing": 0.7647,
+            "n_candidates": 464070,
+            "hit_over_all": 0.5676
+          }
+        },
+        "share_of_d7_candidates_removed": 0.2435
+      }
+    }
+  }
+}
