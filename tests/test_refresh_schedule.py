@@ -227,3 +227,15 @@ def test_loader_keeps_last_good_table_if_file_goes_bad_or_missing(tmp_path):
     p.unlink()
     assert s.schedule_as_of() == "2026-08"
     assert s.flights_on("JFK", "LAX", "2026-11-16")
+
+
+def test_flights_by_number_index_follows_reload(tmp_path):
+    p = tmp_path / "route_schedule.csv.gz"
+    write_gz(p, schedule_df(as_of="2026-08"))
+    s = sched.BtsTypicalSchedule(p)
+    assert s.flights_by_number("AA", "100", "2026-11-16")
+    new = tmp_path / "n.gz"
+    write_gz(new, schedule_df(n_per=1, as_of="2026-09").assign(marketing_flight_number="777"))
+    os.replace(new, p)
+    assert s.flights_by_number("AA", "100", "2026-11-16") == []
+    assert s.flights_by_number("AA", "777", "2026-11-16")
