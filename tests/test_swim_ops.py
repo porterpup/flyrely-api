@@ -168,6 +168,17 @@ def test_retention_keeps_n_days_and_never_the_newest(tmp_path):
     assert (tmp_path / "sfdps" / "2026-09-01").exists() and (tmp_path / "status" / "tfms.json").exists()
 
 
+def test_retention_stdds_keeps_fewer_days_by_default_and_is_overridable(tmp_path):
+    for src in ("tfms", "stdds"):
+        for day in ("2026-11-01", "2026-11-03", "2026-11-04", "2026-11-05"):
+            make_day(tmp_path, src, day)
+    today = date(2026, 11, 5)
+    p = {(d.parent.name, d.name) for d, _ in retention.plan(tmp_path, 14, today)}
+    assert p == {("stdds", "2026-11-01"), ("stdds", "2026-11-03")}
+    p = {(d.parent.name, d.name) for d, _ in retention.plan(tmp_path, 14, today, {"stdds": 3})}
+    assert p == {("stdds", "2026-11-01")}
+
+
 def test_retention_newest_day_survives_even_if_ancient(tmp_path):
     make_day(tmp_path, "tfms", "2026-01-01")
     make_day(tmp_path, "tfms", "2026-01-02")
