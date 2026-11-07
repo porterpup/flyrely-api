@@ -178,6 +178,15 @@ def test_cors_allows_dev_origin_and_rejects_others():
 
 
 def test_usage_shape_is_stable_empty_and_populated():
+    # auth is covered in test_admin_auth.py; here the admin dependency is bypassed
+    main.app.dependency_overrides[main.require_admin] = lambda: "admin@example.com"
+    try:
+        _usage_shape_checks()
+    finally:
+        main.app.dependency_overrides.pop(main.require_admin, None)
+
+
+def _usage_shape_checks():
     keys = {"period_days", "total_predictions", "total_weather_calls", "estimated_cost_usd",
             "avg_predictions_per_day", "daily", "top_routes", "by_risk_level", "note"}
     empty = client.get("/usage").json()
