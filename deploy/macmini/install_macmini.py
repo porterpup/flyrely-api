@@ -70,7 +70,10 @@ def main():
             sh(["launchctl", "bootstrap", DOM, str(p)], dry)
     py = REPO / "venv" / "bin" / "python"
     cmd = [str(py), str(REPO / "deploy" / "install_services.py"), "--mode", "agent",
-           "--sources", "tfms,sfdps,stdds", "--python", str(py), "--log-dir", str(LOGS)]
+           "--sources", "tfms,sfdps,stdds", "--python", str(py), "--log-dir", str(LOGS),
+           # 7 days of TFMS+SFDPS (~1.1 GB/day) plus STDDS 1 day (~4.3 GB/day, set in swim/retention.py)
+           # keeps the archive near 16 GB, under the 20 GB budget
+           "--retention-days", "7"]
     if dry:
         cmd.append("--dry-run")
     print("  $ " + " ".join(cmd))
