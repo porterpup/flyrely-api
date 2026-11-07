@@ -64,11 +64,12 @@ def test_one_row_with_all_fields(store):
     assert set(json.loads(row["features_json"])) == set(main.model_service.feature_names)
 
 
-def test_unknown_airport_tz_leaves_utc_null(store):
-    r = client.post("/predict", json={**REQ, "origin": "XYZ", "flight_id": "x-1"})
-    assert r.status_code == 200
-    (row,) = rows(store)
-    assert row["sched_dep_utc"] is None and row["minutes_to_departure"] is None
+def test_unknown_airport_tz_leaves_utc_null():
+    rec = prediction_log.build_record(
+        flight_id="x-1", origin="XYZ", dest="ATL", sched_dep_local=datetime(2026, 11, 15, 18, 30),
+        marketing_airline="DL", marketing_number=None, operating_airline=None, operating_number=None,
+        delay_probability=0.2, risk_level="medium", model_version="t", features={}, weather_available=False)
+    assert rec["sched_dep_utc"] is None and rec["minutes_to_departure"] is None
 
 
 def test_h2h_client_tag(store):

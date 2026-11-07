@@ -71,7 +71,25 @@ def test_previously_uncovered_airport_predicts_without_warning():
     assert main.build_features("FWA", "ATL", datetime(2026, 11, 15, 18), "DL")["distance"] != 250
 
 
-def test_unknown_airport_still_200_with_warning():
+def test_unknown_airport_is_422():
     r = client.post("/predict", json={**REQ, "origin": "ZZZ"})
-    assert r.status_code == 200
-    assert any("ZZZ" in w for w in r.json()["warnings"])
+    assert r.status_code == 422
+    d = r.json()["detail"]
+    assert d["reason"] == "unknown_airport" and "ZZZ" in d["message"]
+    assert client.post("/predict", json={**REQ, "destination": "QQQ"}).status_code == 422
+
+
+def test_same_origin_and_destination_is_422():
+    r = client.post("/predict", json={**REQ, "origin": "JFK", "destination": "jfk"})
+    assert r.status_code == 422
+    assert r.json()["detail"]["reason"] == "same_airport"
+
+
+def test_every_scheduled_airport_is_in_the_reference():
+    import gzip
+    with gzip.open(ROOT / "models" / "route_schedule.csv.gz", "rt") as f:
+        r = csv.DictReader(f)
+        seen = set()
+        for row in r:
+            seen.add(row["origin"]); seen.add(row["dest"])
+    assert seen - set(main.AIRPORT_COORDS) == set()

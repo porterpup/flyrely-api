@@ -634,16 +634,23 @@ def build_features(origin: str, destination: str, dep_time: datetime, airline: O
     }
 
 
-def get_risk_factors(features: dict, weather_origin: Optional[dict], weather_dest: Optional[dict]) -> list[str]:
-    """Identify risk factors for the flight."""
-    factors = []
-
-    hour = features.get('dep_hour', 12)
+def time_of_day_reason(hour: int) -> Optional[str]:
+    """Plain-language reason from departure hour. The model's delay probability rises through the day
+    (lowest early morning, highest around 17-20h), so these only say that."""
+    if 5 <= hour < 9:
+        return "Early-morning flights are rarely delayed"
     if 17 <= hour <= 21:
-        factors.append("Evening departure (peak congestion time)")
+        return "Evening flights are more often delayed, as delays build up during the day"
+    if 13 <= hour < 17:
+        return "Afternoon flights are somewhat more often delayed, as delays build up during the day"
+    return None
 
-    if features.get('is_holiday_period'):
-        factors.append("Holiday travel period (high traffic)")
+
+def get_risk_factors(features: dict, weather_origin: Optional[dict], weather_dest: Optional[dict],
+                     origin: Optional[str] = None, destination: Optional[str] = None) -> list[str]:
+    """Reasons behind the prediction, most important first (weather, holiday, time of day, busy airport,
+    airport history). Only the model's schedule features and the weather feed these."""
+    factors = []
 
     if weather_origin:
         factors.extend(aviation_weather.weather_risk_factors(weather_origin, "origin"))
@@ -660,6 +667,22 @@ def get_risk_factors(features: dict, weather_origin: Optional[dict], weather_des
             factors.append(f"Low visibility at destination ({weather_dest['visibility_miles']:.1f} mi)")
         if weather_dest['wind_speed_mph'] > 20:
             factors.append(f"High winds at destination ({weather_dest['wind_speed_mph']:.0f} mph)")
+
+    if features.get('is_holiday_period'):
+        factors.append("Holiday travel period (high traffic)")
+
+    tod = time_of_day_reason(features.get('dep_hour', 12))
+    if tod:
+        factors.append(tod)
+
+    busy = []
+    if features.get('origin_is_hub'):
+        busy.append(origin or "the departure airport")
+    if features.get('dest_is_hub'):
+        busy.append(destination or "the arrival airport")
+    if busy:
+        factors.append(f"{' and '.join(busy)} {'is a' if len(busy) == 1 else 'are'} busy "
+                       f"{'airport' if len(busy) == 1 else 'airports'}, where delays spread more easily")
 
     origin_rate = features.get('origin_delay_rate', 0.20)
     if origin_rate > 0.24:
@@ -835,10 +858,16 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
     if operator and operator["operating_airline"] in AIRLINE_DELAY_RATES:
         model_airline = operator["operating_airline"]
 
-    warnings = []
-    for label, code in (("Origin", origin), ("Destination", destination)):
+    for label, code in (("origin", origin), ("destination", destination)):
         if code not in AIRPORT_COORDS:
-            warnings.append(f"{label} airport {code} is not in FlyRely's historical data; using defaults")
+            raise HTTPException(status_code=422, detail={
+                "reason": "unknown_airport",
+                "message": f"We don't recognise the {label} airport {code}. FlyRely covers US airports only."})
+    if origin == destination:
+        raise HTTPException(status_code=422, detail={
+            "reason": "same_airport", "message": "Origin and destination must be different airports."})
+
+    warnings = []
     if model_airline and model_airline not in AIRLINE_DELAY_RATES:
         warnings.append(f"Airline {model_airline} is not in FlyRely's historical data; using defaults")
     if operator and model_airline != operator["operating_airline"]:
@@ -860,7 +889,7 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
     weather_origin, weather_dest = await weather_service.get_weather_pair(
         [(origin, dep_utc), (destination, arr_utc)])
 
-    risk_factors = get_risk_factors(features, weather_origin, weather_dest)
+    risk_factors = get_risk_factors(features, weather_origin, weather_dest, origin, destination)
     recommendations = get_recommendations(risk_level, risk_factors)
 
     usage_logger.record({
@@ -932,7 +961,13 @@ def _score_many(items: list) -> list:
 
 
 import flight_lookup  # noqa: E402   (imports copilot lazily, so the copilot flag-off sentinel holds)
-flight_lookup.mount(app, score_many=_score_many, scored_airlines=AIRLINE_DELAY_RATES, unavailable=PredictionUnavailable)
+def _search_factors(origin: str, destination: str, dep_time: datetime, airline: Optional[str]) -> list[str]:
+    """Schedule-only reasons for a route-search row (no weather lookup per row)."""
+    return get_risk_factors(build_features(origin, destination, dep_time, airline), None, None, origin, destination)
+
+
+flight_lookup.mount(app, score_many=_score_many, scored_airlines=AIRLINE_DELAY_RATES, unavailable=PredictionUnavailable,
+                    known_airports=set(AIRPORT_COORDS), factors_for=_search_factors)
 
 if os.getenv("FLYRELY_FEATURE_DISRUPTION_COPILOT") == "1":
     from copilot import mount as _copilot_mount

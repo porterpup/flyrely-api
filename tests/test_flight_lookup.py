@@ -124,7 +124,8 @@ def test_not_found_404(client):
     r = client.get("/flights/lookup", params={"flight": "UA9999", "date": next_weekday(2)})
     assert r.status_code == 404
     d = r.json()["detail"]
-    assert d["reason"] == "not_found" and "manually" in d["message"]
+    assert d["reason"] == "not_found" and d["message"] == flight_lookup.NOT_FOUND_MESSAGE
+    assert "US domestic flights only" in d["message"] and "enter the details manually" in d["message"]
 
 
 @pytest.mark.parametrize("params", [
@@ -212,3 +213,20 @@ def test_real_search_ewr_sfo_30_flights_speed():
     r = TestClient(main.app).get("/flights/search", params={"origin": "LAX", "dest": "SFO", "date": next_weekday(1)})
     assert r.status_code == 200 and len(r.json()["flights"]) >= 20
     assert _t.perf_counter() - t0 < 3
+
+
+def test_search_unknown_or_non_us_airport_message(client):
+    d = next_weekday(2)
+    r = client.get("/flights/search", params={"origin": "LHR", "dest": "JFK", "date": d})
+    assert r.status_code == 404
+    detail = r.json()["detail"]
+    assert detail["reason"] == "unknown_airport" and "LHR" in detail["message"]
+    assert "US domestic flights only" in detail["message"]
+
+
+def test_search_rows_carry_risk_factors(client):
+    body = client.get("/flights/search", params={"origin": "JFK", "dest": "LAX", "date": next_weekday(2)}).json()
+    for f in body["flights"]:
+        assert isinstance(f["risk_factors"], list)
+    evening = [f for f in body["flights"] if f["dep_time"] == "18:15"][0]
+    assert any("Evening flights" in r for r in evening["risk_factors"])
