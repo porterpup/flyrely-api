@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://aviationweather.gov/api/data"
 USER_AGENT = "FlyRely/1.0"
-TIMEOUT_SECONDS = 4.0
+TIMEOUT_SECONDS = 3.0
+FAILURE_COOLDOWN_SECONDS = 60  # after a failed fetch, skip that product this long so a stall costs one request
 METAR_TTL_SECONDS = 10 * 60
 TAF_TTL_SECONDS = 30 * 60
 KT_TO_MPH = 1.15078
@@ -184,6 +185,8 @@ def compose_weather(metar: Optional[dict], taf: Optional[dict], when: Optional[d
 
     words = decode_wx(wx)
     sky = sky_phrase(clouds)
+    if sky is None and group is None:  # METAR "clouds" is empty for CLR/SKC; its top-level "cover" says so
+        sky = _COVER_WORDS.get(metar.get("cover"))
     conditions = ", ".join(words) if words else (sky or "unknown")
     if words and sky and sky != "clear":
         conditions += f"; {sky}"
@@ -224,6 +227,7 @@ class AviationWeatherClient:
     def __init__(self, client: Optional[httpx.AsyncClient] = None):
         self.client = client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT})
         self._cache: dict[tuple[str, str], tuple[float, Optional[dict]]] = {}
+        self._down_until: dict[str, float] = {}
 
     async def _fetch(self, product: str, ids: list[str], ttl: int) -> dict[str, Optional[dict]]:
         now = time.monotonic()
@@ -235,10 +239,20 @@ class AviationWeatherClient:
                 result[i] = hit[1]
             else:
                 missing.append(i)
-        if missing:
+        if missing and self._down_until.get(product, 0) > now:
+            for i in missing:
+                result[i] = None
+        elif missing:
             try:
-                resp = await self.client.get(f"{BASE_URL}/{product}",
-                                             params={"ids": ",".join(missing), "format": "json"})
+                resp = None
+                for attempt in range(2):  # the API occasionally stalls for seconds; one retry is usually instant
+                    try:
+                        resp = await self.client.get(f"{BASE_URL}/{product}",
+                                                     params={"ids": ",".join(missing), "format": "json"})
+                        break
+                    except httpx.TimeoutException:
+                        if attempt:
+                            raise
                 resp.raise_for_status()
                 rows = resp.json() if resp.content else []
                 by_id: dict[str, dict] = {}
@@ -250,7 +264,8 @@ class AviationWeatherClient:
                     self._cache[(product, i)] = (now, by_id.get(i))
                     result[i] = by_id.get(i)
             except Exception as e:  # network, HTTP, JSON: weather is optional
-                logger.warning("aviationweather %s fetch failed: %s", product, e)
+                logger.warning("aviationweather %s fetch failed: %r", product, e)
+                self._down_until[product] = time.monotonic() + FAILURE_COOLDOWN_SECONDS
                 for i in missing:
                     result[i] = None
         return result
