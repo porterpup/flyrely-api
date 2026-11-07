@@ -19,6 +19,9 @@ from swim.archive import EXTS
 
 log = logging.getLogger("swim.retention")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# STDDS is archived unfiltered (about 4-5 GB/day compressed), so it keeps far fewer days than the
+# filtered TFMS/SFDPS feeds. Override with --source-days stdds=N.
+DEFAULT_SOURCE_DAYS = {"stdds": 1}
 
 
 def day_dirs(source_dir: Path) -> list:
@@ -33,16 +36,18 @@ def day_dirs(source_dir: Path) -> list:
     return out
 
 
-def plan(root: Path, days: int, today: date = None) -> list:
-    """[(day_dir, [files])] to delete. Per source: day older than `days` and not the newest day."""
+def plan(root: Path, days: int, today: date = None, source_days: dict = None) -> list:
+    """[(day_dir, [files])] to delete. Per source: day older than its days (`source_days` overrides
+    `days`; default DEFAULT_SOURCE_DAYS) and not the newest day."""
     today = today or datetime.now(timezone.utc).date()
-    cutoff = today - timedelta(days=days)
+    overrides = DEFAULT_SOURCE_DAYS if source_days is None else source_days
     out = []
     for src in sorted(p for p in Path(root).iterdir() if p.is_dir() and not p.is_symlink()) if Path(root).is_dir() else []:
         dirs = day_dirs(src)
         if not dirs:
             continue
         newest = max(d for d, _ in dirs)
+        cutoff = today - timedelta(days=min(days, overrides.get(src.name, days)))
         for d, path in dirs:
             if d < cutoff and d != newest:
                 files = [f for f in path.iterdir() if f.is_file() and not f.is_symlink() and f.name.endswith(EXTS)]
@@ -57,11 +62,12 @@ def free_gb(path: Path) -> float:
     return shutil.disk_usage(p).free / 1e9
 
 
-def run(root: Path, days: int, dry_run: bool, min_free_gb: float, alert: bool = False, today=None) -> int:
+def run(root: Path, days: int, dry_run: bool, min_free_gb: float, alert: bool = False, today=None,
+        source_days: dict = None) -> int:
     if days < 1:
         raise ValueError("--days must be at least 1")
     freed = 0
-    for path, files in plan(root, days, today):
+    for path, files in plan(root, days, today, source_days):
         size = sum(f.stat().st_size for f in files)
         log.info("%s %s (%d files, %.2f GB)", "would delete" if dry_run else "deleting", path, len(files), size / 1e9)
         freed += size
@@ -96,8 +102,17 @@ def main(argv=None) -> int:
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-free-gb", type=float, default=10.0)
+    ap.add_argument("--source-days", action="append", default=[], metavar="SRC=N",
+                    help="keep N days for one source instead of --days (default stdds=1); repeatable")
     ap.add_argument("--alert", action="store_true", help="send an alert if disk space is low")
     args = ap.parse_args(argv)
+    try:
+        source_days = dict(DEFAULT_SOURCE_DAYS)
+        for item in args.source_days:
+            k, v = item.split("=", 1)
+            source_days[k.strip()] = int(v)
+    except ValueError:
+        ap.error("--source-days must look like stdds=2")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     if args.alert:  # alert channel settings live in <env file>.alerts or the env file
         try:
@@ -107,7 +122,7 @@ def main(argv=None) -> int:
             load_dotenv(ENV_PATH)
         except ImportError:
             pass
-    return run(args.root, args.days, args.dry_run, args.min_free_gb, args.alert)
+    return run(args.root, args.days, args.dry_run, args.min_free_gb, args.alert, source_days=source_days)
 
 
 if __name__ == "__main__":
