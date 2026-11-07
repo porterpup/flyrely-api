@@ -3,7 +3,7 @@ nothing here touches data/ or launchctl/systemctl (the installer is only run wit
 import json
 import plistlib
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -168,15 +168,42 @@ def test_retention_keeps_n_days_and_never_the_newest(tmp_path):
     assert (tmp_path / "sfdps" / "2026-09-01").exists() and (tmp_path / "status" / "tfms.json").exists()
 
 
-def test_retention_stdds_keeps_fewer_days_by_default_and_is_overridable(tmp_path):
+def test_retention_stdds_days_are_overridable(tmp_path):
     for src in ("tfms", "stdds"):
         for day in ("2026-11-01", "2026-11-03", "2026-11-04", "2026-11-05"):
             make_day(tmp_path, src, day)
     today = date(2026, 11, 5)
-    p = {(d.parent.name, d.name) for d, _ in retention.plan(tmp_path, 14, today)}
+    assert not retention.plan(tmp_path, 14, today)  # default: stdds 14 d like tfms
+    p = {(d.parent.name, d.name) for d, _ in retention.plan(tmp_path, 14, today, {"stdds": 1})}
     assert p == {("stdds", "2026-11-01"), ("stdds", "2026-11-03")}
     p = {(d.parent.name, d.name) for d, _ in retention.plan(tmp_path, 14, today, {"stdds": 3})}
     assert p == {("stdds", "2026-11-01")}
+
+
+def test_retention_default_days_per_source_beat_the_days_argument(tmp_path):
+    """sfdps 35 d, tfms 14 d, stdds 14 d by default; the launchd job's --days 7 must not cut them short."""
+    assert retention.DEFAULT_SOURCE_DAYS == {"stdds": 14, "sfdps": 35, "tfms": 14}
+    today = date(2026, 11, 20)
+    for src in ("sfdps", "tfms", "stdds", "other"):
+        for day in ("2026-10-10", "2026-10-14", "2026-10-15", "2026-10-25", "2026-11-05", "2026-11-06", "2026-11-19"):
+            make_day(tmp_path, src, day)
+    got = {}
+    for d, _ in retention.plan(tmp_path, 7, today):
+        got.setdefault(d.parent.name, set()).add(d.name)
+    assert got["sfdps"] == {"2026-10-10", "2026-10-14", "2026-10-15"}  # cutoff 2026-10-16
+    assert got["tfms"] == got["stdds"] == {"2026-10-10", "2026-10-14", "2026-10-15", "2026-10-25", "2026-11-05"}  # cutoff 11-06
+    assert got["other"] == {"2026-10-10", "2026-10-14", "2026-10-15", "2026-10-25", "2026-11-05", "2026-11-06"}  # --days 7
+    assert "2026-11-19" not in {n for v in got.values() for n in v}  # the newest day is never deleted
+
+
+def test_retention_dry_run_lists_no_sfdps_day_newer_than_35_days(tmp_path):
+    today = date(2026, 12, 31)
+    for k in range(0, 60):
+        make_day(tmp_path, "sfdps", (today - timedelta(days=k)).isoformat(), n=1)
+    for d, _ in retention.plan(tmp_path, 7, today):
+        assert (today - date.fromisoformat(d.name)).days > 35
+    assert retention.run(tmp_path, 7, True, 0, today=today) == 0
+    assert len(list((tmp_path / "sfdps").iterdir())) == 60  # dry run deleted nothing
 
 
 def test_retention_newest_day_survives_even_if_ancient(tmp_path):

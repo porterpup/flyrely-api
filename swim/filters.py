@@ -13,7 +13,11 @@ What is kept, per source (all configurable, see deploy/filter.example.json):
          the FIRST message that shows a given actual departure/arrival runway time for a flight,
          and Status. Position/track messages are thinned like TFMS tracks. Batch messages
          (many flights in one message) are split per flight and re-assembled from the kept flights.
-  STDDS  pass-through (only the block list applies) until its messages have been profiled.
+  STDDS  the high-volume surface feed is cut down to what linkage needs: kept are SMES
+         SurfaceMovementEventMessage (runway on/off events), TDES TowerDepartureEventMessage and
+         TDLSCSPMessage (departure / PDC data), status messages (ISMC, DATIS, asdexMsg system status) and
+         anything unrecognised (fail open). Dropped: asdexMsg position reports (positionReport/adsbReport,
+         about 90% of the bytes) and SafetyLogicHoldBar. Only the block list applies if disabled.
 
 LADD hook: if the block-list file exists, flights on it are dropped first, whatever else applies, on every
 path: per flight element in TFMS/SFDPS batches (also with SWIM_FILTER=off), and by a raw-text scan of the whole
@@ -52,10 +56,11 @@ DEFAULTS = {
              "keep_flow": True, "keep_status": True},
     "sfdps": {"enabled": True, "airlines_only": True, "airline_mode": "carriers", "extra_carriers": [],
               "track_interval_min": 5, "keep_message_types": [], "keep_cancellations": True},
-    "stdds": {"enabled": False},
+    "stdds": {"enabled": True, "drop_roots": ["asdexMsg", "SafetyLogicHoldBar"]},
 }
 
 CALLSIGN_RE = re.compile(r"^([A-Z]{3})(\d{1,4})([A-Z]{0,2})$")
+STDDS_ROOT_RE = re.compile(r"<(?!\?)(?:\w+:)?(\w+)")
 ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 TFMS_HEAD_RE = re.compile(r"<(?:\w+:)?fltdMessage\b([^>]*)>")
 SF_MESSAGE_RE = re.compile(r"<message\b.*?</message>", re.S)
@@ -203,6 +208,8 @@ class MessageFilter:
                 out, reason = self._tfms(props, body, now)
             elif self.source == "sfdps":
                 out, reason = self._sfdps(props, body, now)
+            elif self.source == "stdds":
+                out, reason = self._stdds(body)
             else:
                 out, reason = self._guard(body, "keep:passthrough")
         except Exception as e:  # never lose data because of a filter bug (the block list still gets a try)
@@ -268,6 +275,20 @@ class MessageFilter:
         if mtype in c["track_types"]:
             return "keep:track_sample" if self._track_ok(a.get("flightRef") or acid, now) else "drop:track_thinned"
         return "drop:type:" + (mtype or "unknown")
+
+    # -- STDDS
+    def _stdds(self, body):
+        if not self.cfg.get("enabled", True):
+            return self._guard(body, "keep:passthrough")
+        m = STDDS_ROOT_RE.search(body[:3000])
+        root = m.group(1) if m else ""
+        if root in self.cfg.get("drop_roots", ()):
+            # asdexMsg also carries system status ("degraded", ...): that is status, keep it
+            if root == "asdexMsg" and "<systemStatus" in body and "<positionReport" not in body \
+                    and "<adsbReport" not in body:
+                return self._guard(body, "keep:status")
+            return None, "drop:" + root
+        return self._guard(body, "keep:" + (root or "unparsed"))
 
     # -- SFDPS
     def _sfdps(self, props, body, now):

@@ -19,9 +19,12 @@ from swim.archive import EXTS
 
 log = logging.getLogger("swim.retention")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# STDDS is archived unfiltered (about 4-5 GB/day compressed), so it keeps far fewer days than the
-# filtered TFMS/SFDPS feeds. Override with --source-days stdds=N.
-DEFAULT_SOURCE_DAYS = {"stdds": 1}
+# Per-source days. These take precedence over --days (which only applies to sources not listed), so the
+# launchd job's "--days 7" cannot cut SFDPS short. SFDPS 35 d / TFMS 14 d keep raw data until the linkage
+# extractor has back-filled it. STDDS is 14 d because the receive-time filter drops asdexMsg position
+# reports (about 90% of bytes); it was 1 d while archived unfiltered (4.3 GB/day). Disk estimate:
+# deploy/macmini/install_macmini.py. Override with --source-days stdds=N.
+DEFAULT_SOURCE_DAYS = {"stdds": 14, "sfdps": 35, "tfms": 14}
 
 
 def day_dirs(source_dir: Path) -> list:
@@ -47,7 +50,7 @@ def plan(root: Path, days: int, today: date = None, source_days: dict = None) ->
         if not dirs:
             continue
         newest = max(d for d, _ in dirs)
-        cutoff = today - timedelta(days=min(days, overrides.get(src.name, days)))
+        cutoff = today - timedelta(days=overrides.get(src.name, days))
         for d, path in dirs:
             if d < cutoff and d != newest:
                 files = [f for f in path.iterdir() if f.is_file() and not f.is_symlink() and f.name.endswith(EXTS)]
@@ -103,7 +106,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-free-gb", type=float, default=10.0)
     ap.add_argument("--source-days", action="append", default=[], metavar="SRC=N",
-                    help="keep N days for one source instead of --days (default stdds=1); repeatable")
+                    help="keep N days for one source instead of --days (defaults: stdds, sfdps=35, tfms=14; these beat --days); repeatable")
     ap.add_argument("--alert", action="store_true", help="send an alert if disk space is low")
     args = ap.parse_args(argv)
     try:

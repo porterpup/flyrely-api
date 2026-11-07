@@ -71,8 +71,11 @@ def main():
     py = REPO / "venv" / "bin" / "python"
     cmd = [str(py), str(REPO / "deploy" / "install_services.py"), "--mode", "agent",
            "--sources", "tfms,sfdps,stdds", "--python", str(py), "--log-dir", str(LOGS),
-           # 7 days of TFMS+SFDPS (~1.1 GB/day) plus STDDS 1 day (~4.3 GB/day, set in swim/retention.py)
-           # keeps the archive near 16 GB, under the 20 GB budget
+           # Per-source days live in swim/retention.py DEFAULT_SOURCE_DAYS and beat --days (7 only
+           # applies to unlisted sources): SFDPS 35 d (~0.2 GB/day), TFMS 14 d (~0.9 GB/day), STDDS 14 d
+           # (~0.3 GB/day after the receive-time filter drops position reports; 4.3 GB/day unfiltered).
+           # About 1.4 GB/day total; steady state ~7 + ~13 + ~4 = ~24 GB, ~27 GB peak with headroom.
+           # Sean approved a ~30 GB budget on 2026-11-07 (was 20 GB).
            "--retention-days", "7"]
     if dry:
         cmd.append("--dry-run")

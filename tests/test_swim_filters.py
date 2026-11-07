@@ -110,7 +110,7 @@ def test_unparseable_and_errors_fail_open(monkeypatch):
 def test_filter_disabled_and_stdds_passthrough():
     f = flt(cfg={"enabled": False})
     assert f.apply(FLIGHT, tfms("N1", "trackInformation"), 0)[0] is not None
-    assert flt("stdds").apply({}, "<a/>", 0) == ("<a/>", "keep:passthrough")
+    assert flt("stdds", cfg={"enabled": False}).apply({}, "<a/>", 0) == ("<a/>", "keep:passthrough")
 
 
 # ------------------------------------------------------------------ SFDPS
@@ -198,7 +198,8 @@ def test_load_config_overlay_and_env(tmp_path):
     p.write_text(json.dumps({"nope": {}}))
     with pytest.raises(ValueError):
         filters.load_config(str(p), env={})
-    assert not filters.load_config(None, env={})["stdds"]["enabled"]
+    assert filters.load_config(None, env={})["stdds"]["enabled"]
+    assert not filters.load_config(None, env={"SWIM_FILTER": "off"})["stdds"]["enabled"]
 
 
 def test_example_config_is_valid_and_matches_defaults():
@@ -313,3 +314,35 @@ def test_sfdps_cancellation_kept():
     assert f.apply(SF, sf_body(blk), 0) == (sf_body(blk), "keep:cancellation")
     off = flt("sfdps", cfg={"keep_cancellations": False})
     assert off.apply(SF, sf_body(blk), 0)[0] is None
+
+
+# ------------------------------------------------------------------ STDDS
+NS = 'xmlns:ns2="urn:us:gov:dot:faa:atm:terminal:entities:v4-0:smes:surfacemovementevent"'
+PROLOG = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+ST = {
+    "pos_at": f'{PROLOG}<ns2:asdexMsg {NS}><airport>KDFW</airport><positionReport full="false"><track>1</track></positionReport></ns2:asdexMsg>',
+    "pos_ad": f'{PROLOG}<ns2:asdexMsg {NS}><airport>KPHL</airport><adsbReport full="false"><report/></adsbReport></ns2:asdexMsg>',
+    "holdbar": f'{PROLOG}<ns2:SafetyLogicHoldBar {NS}><airport>KORD</airport><control>1</control></ns2:SafetyLogicHoldBar>',
+    "sysstatus": f'{PROLOG}<ns2:asdexMsg {NS}><airport>KMCI</airport><systemStatus><state>degraded</state></systemStatus></ns2:asdexMsg>',
+    "smes": f'{PROLOG}<ns2:SurfaceMovementEventMessage {NS}><callsign>SKW5988</callsign><event>runwayin</event></ns2:SurfaceMovementEventMessage>',
+    "tdes": f'{PROLOG}<ns5:TowerDepartureEventMessage xmlns:ns5="urn:x"><aircraftID>UAL1</aircraftID></ns5:TowerDepartureEventMessage>',
+    "pdc": f'{PROLOG}<ns4:TDLSCSPMessage xmlns:ns4="urn:y"><aircraftID>UAL1</aircraftID><dataBody>/AN N1</dataBody></ns4:TDLSCSPMessage>',
+    "status": f'{PROLOG}<ns2:STDDSStatus xmlns:ns2="urn:z"><x/></ns2:STDDSStatus>',
+}
+
+
+def test_stdds_drops_positions_and_holdbars_keeps_events_and_status():
+    f = flt("stdds")
+    for k in ("pos_at", "pos_ad", "holdbar"):
+        assert f.apply({}, ST[k], 0)[0] is None, k
+    for k in ("sysstatus", "smes", "tdes", "pdc", "status"):
+        assert f.apply({}, ST[k], 0)[0] == ST[k], k
+    assert f.apply({}, "not xml at all", 0)[0] == "not xml at all"  # unknown: fail open
+    assert f.counts["drop:asdexMsg"] == 2 and f.counts["drop:SafetyLogicHoldBar"] == 1
+    assert f.counts["keep:status"] == 1 and f.counts["keep:SurfaceMovementEventMessage"] == 1
+
+
+def test_stdds_ladd_still_applies_to_kept_messages(tmp_path):
+    f = flt("stdds", ids=["SKW5988"], tmp_path=tmp_path)
+    assert f.apply({}, ST["smes"], 0) == (None, "drop:ladd_text")
+    assert f.apply({}, ST["tdes"], 0)[0] is not None
