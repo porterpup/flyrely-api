@@ -170,3 +170,22 @@ def test_provider_builds_forecasts_from_a_bundle():
     out = prov.forecast([LegSpec("SFO", "DEN", datetime(2026, 12, 3, 7, 10), "UA")] * 2)
     assert len(out) == 2 and out[0].provider == "booking-ladder-v1" and 0 <= out[0].p_cancel <= 1
     assert 0 <= C.miss_probability(out[0], out[1], 60, 40) <= 1
+
+
+def test_miss_batch_equals_single_calls():
+    rows = [A1, [0.97, 0.9, 0.7, 0.35, 0.25, 0.2, 0.15, 0.1, 0.06, 0.03, 0.01], [0.9, 0.7, 0.4, 0.1, 0.07, 0.05, 0.03, 0.02, 0.01, 0.005, 0.002]]
+    drows = [D1, [0.8, 0.5, 0.3, 0.2, 0.15, 0.1, 0.07, 0.04, 0.02, 0.01], [0.5, 0.2, 0.08, 0.04, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005]]
+    AP = L.rearrange(np.array(rows))
+    DP = L.rearrange(np.array(drows))
+    s = np.array([20, -5, 75])
+    hubs = np.array(["DEN", "ATL", "DEN"])
+    lay = s + 40
+    dm = C.DependenceModel("R2", 0.25, {"DEN|lt60": (0.5, 20000), "DEN|60_120": (0.1, 20000)}, 5000.0)
+    rv = dm.rho_vector(hubs, lay)
+    assert np.allclose(rv, [dm.rho(h, v) for h, v in zip(hubs, lay)])
+    got = C.miss_batch(AP, DP, TAIL_A, TAIL_D, s, {"R0": 0.0, "R2": rv}, chunk=2)
+    for i in range(3):
+        a = L.Ladder(L.ARR_THRESHOLDS, tuple(AP[i]), TAIL_A)
+        d = L.Ladder(L.DEP_THRESHOLDS, tuple(DP[i]), TAIL_D)
+        assert got["R0"][i] == pytest.approx(C._miss(a, d, s[i], 0.0), abs=1e-9)
+        assert got["R2"][i] == pytest.approx(C._miss(a, d, s[i], rv[i]), abs=1e-9)
