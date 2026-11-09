@@ -42,3 +42,4 @@ reports/
 logs/
 !copilot/data/
 models/route_schedule.csv.gz.prev
+models/arrival_ladder_v1.joblib*
