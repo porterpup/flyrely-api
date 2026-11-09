@@ -211,7 +211,7 @@ def mount(app, m) -> None:
             background_tasks.add_task(m.prediction_store.safe_write_itinerary, rows)
         return {
             "itinerary_id": itinerary_id,
-            "legs": [r.model_dump(exclude_unset=True) for r in responses],
+            "legs": [r.model_dump() for r in responses],
             "connections": connections,
             "trip": trip,
             "warnings": [],

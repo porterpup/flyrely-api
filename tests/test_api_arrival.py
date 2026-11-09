@@ -120,3 +120,18 @@ def test_real_artifact_loads_and_matches_manifest():
     assert svc.loaded, svc.load_error
     f = svc.forecast([LegSpec("SFO", "DEN", datetime(2026, 12, 3, 7, 10), "UA")])[0]
     assert 0 < f.arr.prob_late(15) < 1
+
+
+def test_flags_off_keeps_unset_nested_weather_keys(monkeypatch):
+    """Tomorrow.io / OpenWeatherMap weather dicts leave WeatherData.source/as_of/ceiling_ft/wx unset; master returns
+    them as null, so the T6 change must not strip them (it once used response_model_exclude_unset)."""
+    w = {"temperature_f": 50.0, "wind_speed_mph": 5.0, "visibility_miles": 10.0, "conditions": "clear"}
+
+    async def fake_pair(pairs):
+        return dict(w), dict(w)
+
+    monkeypatch.setattr(main.weather_service, "get_weather_pair", fake_pair)
+    body = client.post("/predict", json=SNAP["plain"]["request"]).json()
+    for side in ("origin_weather", "destination_weather"):
+        assert body[side] == {**w, "source": None, "as_of": None, "ceiling_ft": None, "wx": None}
+    assert "arrival" not in body and "arrival_time" not in body

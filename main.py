@@ -43,7 +43,7 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 import codeshare
 import prediction_log
@@ -276,6 +276,18 @@ class PredictionResponse(BaseModel):
     # Only present when the arrival flag is on (null then means the ladder is unavailable); arrival_time only when sent
     arrival_time: Optional[str] = None
     arrival: Optional[dict] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_arrival(self, handler):
+        """Drop `arrival` / `arrival_time` unless they were set, so the output is byte-identical to before T6 when the
+        flags are off. (Not `response_model_exclude_unset`: that also strips unset nested keys, e.g. WeatherData.source
+        from the Tomorrow.io / OpenWeatherMap providers.)"""
+        data = handler(self)
+        if isinstance(data, dict):
+            for k in ("arrival_time", "arrival"):
+                if k not in self.model_fields_set:
+                    data.pop(k, None)
+        return data
 
 # =============================================================================
 # Weather Service
@@ -853,7 +865,7 @@ def _weather_times(origin: str, destination: str, dep_local: datetime):
         return None, None
 
 
-@app.post("/predict", response_model=PredictionResponse, response_model_exclude_unset=True)
+@app.post("/predict", response_model=PredictionResponse)
 async def predict_delay(request: FlightRequest, background_tasks: BackgroundTasks):
     """
     Predict flight delay risk.
@@ -861,8 +873,8 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
     Returns 503 {"detail": {"reason": "model_unavailable" | "prediction_failed", "message": ...}}
     when no real prediction can be made.
 
-    `exclude_unset`: every pre-existing field is always set explicitly, so the output is unchanged; the optional
-    `arrival` / `arrival_time` keys appear only when set (arrival flag on, or the request sent arrival_time).
+    The optional `arrival` / `arrival_time` keys appear only when set (arrival flag on, or the request sent
+    arrival_time); see PredictionResponse._omit_unset_arrival.
     """
     response, _ = await _predict_core(request, background_tasks)
     return response
