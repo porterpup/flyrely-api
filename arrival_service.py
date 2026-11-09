@@ -36,7 +36,7 @@ def sha256_file(path) -> str:
 
 # The only T5 connection outcome under which copula miss probabilities may be served (PROTOCOL_ARRIVAL_CONNECTIONS.md;
 # backtest/eval_arrival_connections.py). Any other recorded outcome (the C4 layover-table fallback, or no connection
-# numbers at all) makes the itinerary endpoint refuse with 503 instead of serving copula numbers.
+# numbers at all), or no recorded outcome, makes the itinerary endpoint refuse with 503 instead of serving copula numbers.
 SHIP_OUTCOME = "ship_miss_probability_for_validated_connections"
 
 
@@ -110,7 +110,7 @@ class ArrivalService:
         try:
             d = json.loads(self.dependence_path.read_text())
             outcome = d.get("decision_outcome")
-            if outcome is not None and outcome != SHIP_OUTCOME:
+            if outcome != SHIP_OUTCOME:          # fail closed: a file without an outcome is refused too
                 raise ValueError(f"connection evaluation outcome is {outcome!r}; copula numbers are not served")
             self.recalibration = load_recalibration(d)
             self.dependence = _dependence_from(d)

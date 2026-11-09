@@ -22,7 +22,10 @@ from copilot.schedule import BtsTypicalSchedule
 ROOT = Path(__file__).resolve().parent.parent
 HEADER = ("marketing_airline,marketing_flight_number,origin,dest,dep_time,arr_time,operating_airline,"
           "operating_flight_number,dow_mask,days_seen,schedule_as_of\n")
-ROWS = ["UA,648,SFO,DEN,07:10,10:42,UA,648,127,55,2026-08"]
+ROWS = ["UA,648,SFO,DEN,07:10,10:42,UA,648,127,55,2026-08",
+        "DL,1999,ATL,BHM,09:00,08:58,DL,1999,127,55,2026-08",     # westbound short hop, same day (ET -> CT)
+        "DL,2400,ATL,BNA,23:55,23:58,DL,2400,127,55,2026-08",     # late westbound, same day (00:58 ET)
+        "UA,1700,SFO,EWR,23:00,07:25,UA,1700,127,55,2026-08"]     # eastbound red-eye, next day
 DAY = "2030-12-03"
 
 
@@ -360,10 +363,12 @@ def test_null_recalibration_leaves_the_copula_number(client, monkeypatch, tmp_pa
 
 
 @pytest.mark.parametrize("outcome", ["serve_layover_table_B-L_itin-layover-table-v1", "no_connection_numbers",
-                                     "no_connection_numbers_c6_failed"])
+                                     "no_connection_numbers_c6_failed", None])
 def test_503_when_the_evaluation_did_not_ship_copula_numbers(client, monkeypatch, tmp_path, outcome):
-    svc = _service_with_file(_dep_file(tmp_path, recalibration=None, chosen="R1", decision_outcome=outcome))
-    assert svc.dependence is None and outcome in svc.dependence_error
+    """Fail closed: any outcome but ship, or a file with no decision_outcome at all, is refused."""
+    extra = {} if outcome is None else {"decision_outcome": outcome}
+    svc = _service_with_file(_dep_file(tmp_path, recalibration=None, chosen="R1", **extra))
+    assert svc.dependence is None and repr(outcome) in svc.dependence_error
     monkeypatch.setattr(main, "arrival_service", svc)
     r = post(client, [UA648, UA1442], [{}])
     assert r.status_code == 503 and reason(r) == "model_unavailable"
@@ -375,3 +380,28 @@ def test_503_when_the_evaluation_did_not_ship_copula_numbers(client, monkeypatch
 def test_malformed_recalibration_refuses_the_file(tmp_path, recal):
     svc = _service_with_file(_dep_file(tmp_path, recalibration=recal, decision_outcome=arrival_service.SHIP_OUTCOME))
     assert svc.dependence is None and svc.recalibration is None and svc.dependence_error
+
+
+# ------------------------------------------------------------------ schedule-derived arrival: zones and midnight
+
+def test_westbound_short_hop_lands_the_same_day(client):
+    """ATL 09:00 ET -> BHM 08:58 CT: earlier on the clock, but 58 min later in real time."""
+    r = post(client, [leg("DL1999", "ATL", "BHM", "09:00"), leg("DL2000", "BHM", "IAH", "10:00", "12:00")], [{}])
+    assert r.status_code == 200, r.text
+    assert r.json()["connections"][0]["scheduled_layover_minutes"] == 62
+
+
+def test_eastbound_red_eye_lands_the_next_day(client):
+    nxt = {**leg("UA1800", "EWR", "BOS", "08:30", "09:45"), "departure_time": "2030-12-04T08:30:00"}
+    r = post(client, [leg("UA1700", "SFO", "EWR", "23:00"), nxt], [{}])
+    assert r.status_code == 200, r.text
+    assert r.json()["connections"][0]["scheduled_layover_minutes"] == 65
+
+
+def test_departure_match_wraps_across_midnight(client):
+    """Entered as 00:05 on the 4th; the schedule has 23:55 on the 3rd (10 min away), which then dates the arrival."""
+    first = {**leg("DL2400", "ATL", "BNA", "00:05"), "departure_time": "2030-12-04T00:05:00"}
+    nxt = {**leg("DL2401", "BNA", "MEM", "01:00", "02:00"), "departure_time": "2030-12-04T01:00:00"}
+    r = post(client, [first, nxt], [{}])
+    assert r.status_code == 200, r.text
+    assert r.json()["connections"][0]["scheduled_layover_minutes"] == 62      # 23:58 CT on the 3rd -> 01:00

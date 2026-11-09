@@ -74,14 +74,28 @@ def _rate_limit(request: Request) -> None:
         raise HTTPException(status_code=429, detail="rate limit exceeded", headers={"Retry-After": "10"})
 
 
-def _leg(f) -> dict:
+def arrives_next_day(origin: str, dest: str, dep_hhmm: str, arr_hhmm: str, day) -> bool:
+    """Whether a flight leaving `origin` at local `dep_hhmm` on `day` lands at local `arr_hhmm` on the next day.
+
+    Compared in UTC with each airport's own zone, so a westbound short hop such as ATL 09:00 ET -> BHM 08:58 CT is the
+    same day. Only if a zone is unknown does it fall back to comparing the clock times.
+    """
+    from prediction_log import to_utc     # time zones from models/airports_ref.csv (via main), same as the log
+    dep_utc = to_utc(datetime.fromisoformat(f"{day.isoformat()}T{dep_hhmm}:00"), origin)
+    arr_utc = to_utc(datetime.fromisoformat(f"{day.isoformat()}T{arr_hhmm}:00"), dest)
+    if dep_utc is None or arr_utc is None:
+        return arr_hhmm < dep_hhmm
+    return arr_utc <= dep_utc
+
+
+def _leg(f, day) -> dict:
     op = f.operating_airline
     return {
         "origin": f.origin,
         "dest": f.dest,
         "dep_time": f.dep_time,
         "arr_time": f.arr_time,
-        "arr_next_day": f.arr_time < f.dep_time,
+        "arr_next_day": arrives_next_day(f.origin, f.dest, f.dep_time, f.arr_time, day),
         "operating_airline": op,
         "operating_airline_name": codeshare.OPERATOR_NAMES.get(op, op),
         "operating_flight_number": f.operating_flight_number,
@@ -132,7 +146,7 @@ def lookup_flight(request: Request,
         "airline": searched,
         "flight_number": number,
         "date": day.isoformat(),
-        "matches": [_leg(f) for f in legs],
+        "matches": [_leg(f, day) for f in legs],
         "source": SOURCE,
         "confidence": "typical_schedule",
         "schedule_as_of": as_of,
@@ -217,7 +231,7 @@ def make_search(score_many, scored_airlines, unavailable, known_airports=None, f
         as_of = sched.schedule_as_of()
         flights = []
         for f, (prob, risk) in zip(legs, scores):
-            row = _leg(f)
+            row = _leg(f, day)
             row.update({"flight": f.flight_number, "airline": f.marketing_airline,
                         "airline_name": codeshare.OPERATOR_NAMES.get(f.marketing_airline, f.marketing_airline),
                         "flight_number": f.flight_number[len(f.marketing_airline):],

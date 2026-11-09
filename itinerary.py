@@ -78,19 +78,33 @@ def risk_band(p: float) -> str:
 
 
 def _resolve_arrival(leg: LegIn, schedule) -> Optional[datetime]:
-    """Scheduled local arrival from the typical schedule by flight number and date, or None."""
+    """Scheduled local arrival from the typical schedule by flight number and date, or None.
+
+    The schedule departure must be within 90 minutes of the leg's, measured on real datetimes, so a match can wrap
+    across midnight (a 00:05 entry matches a 23:55 departure on the previous day, which then sets the arrival date).
+    Next-day arrival is decided in UTC from both airports' zones (flight_lookup.arrives_next_day)."""
+    import flight_lookup
     airline, number = codeshare.parse_flight(leg.airline.upper() if leg.airline else None, leg.flight_number)
     if not airline or not number:
         return None
-    day = leg.departure_time.date()
-    for f in schedule.flights_by_number(airline, number, day):
-        if f.origin == leg.origin.upper() and f.dest == leg.destination.upper():
-            if abs(_hhmm(f.dep_time) - (leg.departure_time.hour * 60 + leg.departure_time.minute)) > 90:
+    origin, dest = leg.origin.upper(), leg.destination.upper()
+    want = leg.departure_time.replace(tzinfo=None)
+    best = None
+    for day in (want.date(), want.date() - timedelta(days=1), want.date() + timedelta(days=1)):
+        for f in schedule.flights_by_number(airline, number, day):
+            if f.origin != origin or f.dest != dest:
                 continue
-            arr_min, dep_min = _hhmm(f.arr_time), _hhmm(f.dep_time)
-            base = datetime.combine(day, datetime.min.time())
-            return base + timedelta(minutes=arr_min) + (timedelta(days=1) if arr_min < dep_min else timedelta())
-    return None
+            dep = datetime.combine(day, datetime.min.time()) + timedelta(minutes=_hhmm(f.dep_time))
+            gap = abs((dep - want).total_seconds()) / 60
+            if gap <= 90 and (best is None or gap < best[0]):
+                best = (gap, day, f)
+    if best is None:
+        return None
+    _, day, f = best
+    arr = datetime.combine(day, datetime.min.time()) + timedelta(minutes=_hhmm(f.arr_time))
+    if flight_lookup.arrives_next_day(origin, dest, f.dep_time, f.arr_time, day):
+        arr += timedelta(days=1)
+    return arr
 
 
 def _hhmm(s: str) -> int:
