@@ -189,8 +189,8 @@ def mount(app, m) -> None:
             validated = reason is None
             miss = None
             if validated:
-                miss = round(miss_probability(forecasts[i], forecasts[i + 1], layover, minutes,
-                                              svc.dependence, hub), 4)
+                miss = round(svc.calibrate_miss(miss_probability(forecasts[i], forecasts[i + 1], layover, minutes,
+                                                                 svc.dependence, hub)), 4)
             misses.append(0.0 if through else miss)
             connections.append({
                 "at": hub, "kind": kind, "scheduled_layover_minutes": layover,

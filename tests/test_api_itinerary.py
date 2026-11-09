@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -309,3 +310,68 @@ def test_flag_on_mounts_route_and_cors_is_unchanged():
     assert on["post"] == 503            # ladder file not on this machine / CI: the whole call is a clean 503
     assert off["ok"] == on["ok"] == on["ok_itin"] == "http://localhost:5173"
     assert off["bad"] is None and on["bad"] is None and on["bad_itin"] is None
+
+
+# ------------------------------------------------------------------ T5 dependence file: recalibration and outcome guard
+
+def _dep_file(tmp_path, **extra):
+    p = tmp_path / "connection_dependence_v1.json"
+    p.write_text(json.dumps({"variant": "R1", "global_rho": 0.3, "by_cell": {}, "shrink_n": 5000.0, **extra}))
+    return p
+
+
+def _service_with_file(path):
+    """The fake ladder plus the dependence fields exactly as ArrivalService._load reads them from `path`."""
+    real = arrival_service.ArrivalService(ladder_path=Path("/nonexistent"), dependence_path=path)
+    svc = arrival_fakes.make_service()
+    svc.dependence, svc.dependence_error = real.dependence, real.dependence_error
+    svc.recalibration, svc.decision_outcome = real.recalibration, real.decision_outcome
+    return svc
+
+
+def test_isotonic_recalibration_matches_sklearn():
+    from sklearn.isotonic import IsotonicRegression
+    rng = np.random.default_rng(1)
+    p = rng.random(500)
+    iso = IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1).fit(p, (rng.random(500) < p ** 1.5).astype(float))
+    recal = arrival_service.load_recalibration({"recalibration": {"type": "isotonic", "x": iso.X_thresholds_.tolist(),
+                                                                  "y": iso.y_thresholds_.tolist()}})
+    q = np.array([-0.1, 0.0, 0.03, 0.2, 0.5, 0.77, 1.0, 1.2])
+    got = [arrival_service.apply_recalibration(v, recal) for v in q]
+    assert np.allclose(got, iso.predict(q))
+
+
+def test_recalibration_is_applied_to_the_miss_probability(client, monkeypatch, tmp_path):
+    raw = post(client, [UA648, UA1442], [{}]).json()["connections"][0]["miss_probability"]
+    svc = _service_with_file(_dep_file(tmp_path, recalibration={"type": "isotonic", "x": [0.0, 1.0], "y": [0.5, 0.5]},
+                                       chosen="R1+iso", decision_outcome=arrival_service.SHIP_OUTCOME))
+    assert svc.dependence is not None, svc.dependence_error
+    monkeypatch.setattr(main, "arrival_service", svc)
+    c = post(client, [UA648, UA1442], [{}]).json()["connections"][0]
+    assert raw != 0.5 and c["miss_probability"] == 0.5 and c["risk_level"] == "high"
+
+
+def test_null_recalibration_leaves_the_copula_number(client, monkeypatch, tmp_path):
+    raw = post(client, [UA648, UA1442], [{}]).json()["connections"][0]["miss_probability"]
+    svc = _service_with_file(_dep_file(tmp_path, recalibration=None, chosen="R1",
+                                       decision_outcome=arrival_service.SHIP_OUTCOME))
+    monkeypatch.setattr(main, "arrival_service", svc)
+    assert post(client, [UA648, UA1442], [{}]).json()["connections"][0]["miss_probability"] == raw
+
+
+@pytest.mark.parametrize("outcome", ["serve_layover_table_B-L_itin-layover-table-v1", "no_connection_numbers",
+                                     "no_connection_numbers_c6_failed"])
+def test_503_when_the_evaluation_did_not_ship_copula_numbers(client, monkeypatch, tmp_path, outcome):
+    svc = _service_with_file(_dep_file(tmp_path, recalibration=None, chosen="R1", decision_outcome=outcome))
+    assert svc.dependence is None and outcome in svc.dependence_error
+    monkeypatch.setattr(main, "arrival_service", svc)
+    r = post(client, [UA648, UA1442], [{}])
+    assert r.status_code == 503 and reason(r) == "model_unavailable"
+
+
+@pytest.mark.parametrize("recal", [{"type": "platt", "a": 1}, {"type": "isotonic", "x": [0.0, 1.0], "y": [0.2]},
+                                   {"type": "isotonic", "x": [0.5, 0.1], "y": [0.1, 0.2]},
+                                   {"type": "isotonic", "x": [0.0, 1.0], "y": [0.0, 1.5]}])
+def test_malformed_recalibration_refuses_the_file(tmp_path, recal):
+    svc = _service_with_file(_dep_file(tmp_path, recalibration=recal, decision_outcome=arrival_service.SHIP_OUTCOME))
+    assert svc.dependence is None and svc.recalibration is None and svc.dependence_error

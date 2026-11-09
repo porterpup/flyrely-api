@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
+import numpy as np
+
 from flyrely_dist.connections import DependenceModel, LegForecast
 from flyrely_dist.ladder import LadderBundle, load_bundle
 from flyrely_dist.providers import BookingLadderProvider, LegSpec
@@ -32,11 +34,43 @@ def sha256_file(path) -> str:
     return h.hexdigest()
 
 
+# The only T5 connection outcome under which copula miss probabilities may be served (PROTOCOL_ARRIVAL_CONNECTIONS.md;
+# backtest/eval_arrival_connections.py). Any other recorded outcome (the C4 layover-table fallback, or no connection
+# numbers at all) makes the itinerary endpoint refuse with 503 instead of serving copula numbers.
+SHIP_OUTCOME = "ship_miss_probability_for_validated_connections"
+
+
 def load_dependence(path) -> DependenceModel:
-    d = json.loads(Path(path).read_text())
+    return _dependence_from(json.loads(Path(path).read_text()))
+
+
+def _dependence_from(d: dict) -> DependenceModel:
     cells = {k: (float(v[0]), int(v[1])) for k, v in (d.get("by_cell") or {}).items()}
     return DependenceModel(str(d.get("variant", "R1")), float(d.get("global_rho", 0.0)), cells,
                            float(d.get("shrink_n", 5000.0)))
+
+
+def load_recalibration(d: dict) -> Optional[tuple[np.ndarray, np.ndarray]]:
+    """Isotonic breakpoints written by the T5 eval ({"type": "isotonic", "x": [...], "y": [...]}, from sklearn's
+    IsotonicRegression(out_of_bounds="clip") X_thresholds_ / y_thresholds_), or None. Raises on a malformed block."""
+    r = d.get("recalibration")
+    if r is None:
+        return None
+    if r.get("type") != "isotonic":
+        raise ValueError(f"unknown recalibration type {r.get('type')!r}")
+    x, y = np.asarray(r["x"], dtype=float), np.asarray(r["y"], dtype=float)
+    if x.ndim != 1 or len(x) == 0 or x.shape != y.shape or np.any(np.diff(x) < 0) or np.any(np.diff(y) < 0) \
+            or not np.all(np.isfinite(x)) or not np.all((y >= 0) & (y <= 1)):
+        raise ValueError("malformed isotonic recalibration")
+    return x, y
+
+
+def apply_recalibration(p: float, recal: Optional[tuple[np.ndarray, np.ndarray]]) -> float:
+    """Same as IsotonicRegression(out_of_bounds="clip").predict: linear between breakpoints, flat beyond the ends."""
+    if recal is None:
+        return float(p)
+    x, y = recal
+    return float(np.interp(p, x, y))
 
 
 class ArrivalService:
@@ -52,6 +86,8 @@ class ArrivalService:
         self.bundle: Optional[LadderBundle] = None
         self.provider: Optional[BookingLadderProvider] = None
         self.dependence: Optional[DependenceModel] = None
+        self.recalibration: Optional[tuple] = None
+        self.decision_outcome: Optional[str] = None
         self.load_error: Optional[str] = None
         self.dependence_error: Optional[str] = None
         if enabled:
@@ -72,10 +108,17 @@ class ArrivalService:
             self.load_error = f"{type(e).__name__}: {e}"
             logger.error(f"Arrival ladder unavailable: {self.load_error}")
         try:
-            self.dependence = load_dependence(self.dependence_path)
+            d = json.loads(self.dependence_path.read_text())
+            outcome = d.get("decision_outcome")
+            if outcome is not None and outcome != SHIP_OUTCOME:
+                raise ValueError(f"connection evaluation outcome is {outcome!r}; copula numbers are not served")
+            self.recalibration = load_recalibration(d)
+            self.dependence = _dependence_from(d)
+            self.decision_outcome = outcome
         except Exception as e:
-            self.dependence = None
+            self.dependence = self.recalibration = None
             self.dependence_error = f"{type(e).__name__}: {e}"
+            logger.error(f"Connection dependence unavailable: {self.dependence_error}")
 
     @property
     def loaded(self) -> bool:
@@ -84,6 +127,10 @@ class ArrivalService:
     @property
     def version(self) -> Optional[str]:
         return self.bundle.version if self.bundle else None
+
+    def calibrate_miss(self, p: float) -> float:
+        """Apply the T5 isotonic recalibration (if any) to a copula P(miss)."""
+        return apply_recalibration(p, self.recalibration)
 
     def forecast(self, legs: list[LegSpec]) -> list[LegForecast]:
         return self.provider.forecast(legs)
