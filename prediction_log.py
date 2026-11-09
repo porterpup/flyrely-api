@@ -124,11 +124,12 @@ def build_record(*, flight_id: str, origin: str, dest: str, sched_dep_local: dat
                  delay_probability: float, risk_level: str, model_version: str,
                  features: dict, weather_available: bool, horizon: str = "booking",
                  rates_as_of: Optional[date] = None, live_inputs: Optional[dict] = None,
-                 now: Optional[datetime] = None) -> dict:
+                 now: Optional[datetime] = None, arr_probability: Optional[float] = None,
+                 cancel_probability: Optional[float] = None, arr_model_version: Optional[str] = None) -> dict:
     now = now or datetime.now(timezone.utc)
     dep_utc = to_utc(sched_dep_local, origin)
     minutes = int((dep_utc - now).total_seconds() // 60) if dep_utc else None
-    return {
+    rec = {
         "prediction_id": str(uuid.uuid4()),
         "ts_utc": now,
         "flight_id": flight_id,
@@ -151,6 +152,39 @@ def build_record(*, flight_id: str, origin: str, dest: str, sched_dep_local: dat
         "live_inputs_json": live_inputs,
         "weather_available": weather_available,
     }
+    # Arrival columns (migration 004) are only written when there is an arrival forecast, so a database that has not
+    # been migrated keeps working while the arrival flags are off.
+    for k, v in (("arr_probability", arr_probability), ("cancel_probability", cancel_probability),
+                 ("arr_model_version", arr_model_version)):
+        if v is not None:
+            rec[k] = v
+    return rec
+
+
+ARRIVAL_COLUMNS = {"arr_probability": ("REAL", "double precision"),
+                   "cancel_probability": ("REAL", "double precision"),
+                   "arr_model_version": ("TEXT", "text")}
+
+ITIN_COLUMNS = ["itinerary_id", "ts_utc", "connection_index", "leg_flight_ids", "at", "kind", "layover_min",
+                "mct_min", "mct_source", "miss_probability", "validated", "not_validated_reason", "model_version"]
+_ITIN_SQLITE_DDL = """
+CREATE TABLE IF NOT EXISTS itinerary_predictions (
+    itinerary_id TEXT NOT NULL, ts_utc TEXT NOT NULL, connection_index INTEGER NOT NULL, leg_flight_ids TEXT NOT NULL,
+    at TEXT NOT NULL, kind TEXT NOT NULL, layover_min INTEGER, mct_min INTEGER, mct_source TEXT,
+    miss_probability REAL, validated INTEGER NOT NULL, not_validated_reason TEXT, model_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_itinerary_predictions_itinerary ON itinerary_predictions (itinerary_id);
+"""
+_ITIN_PG_DDL = [
+    """CREATE TABLE IF NOT EXISTS itinerary_predictions (
+        id bigint generated always as identity primary key,
+        itinerary_id text NOT NULL, ts_utc timestamptz NOT NULL, connection_index integer NOT NULL,
+        leg_flight_ids text[] NOT NULL, at text NOT NULL, kind text NOT NULL, layover_min integer, mct_min integer,
+        mct_source text, miss_probability double precision, validated boolean NOT NULL,
+        not_validated_reason text, model_version text NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_itinerary_predictions_itinerary ON itinerary_predictions (itinerary_id)",
+    "ALTER TABLE itinerary_predictions ENABLE ROW LEVEL SECURITY",
+]
 
 
 def _dumps(obj) -> Optional[str]:
@@ -196,10 +230,63 @@ class PredictionStore:
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
+    def _ensure_arrival_columns(self) -> None:
+        """Add the migration-004 columns if missing (same self-migrating approach as the CREATE TABLE above)."""
+        if getattr(self, "_arr_cols_ready", False):
+            return
+        if self.database_url:
+            with self._connect_pg() as conn:
+                for name, (_, pg) in ARRIVAL_COLUMNS.items():
+                    conn.execute(f"ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {name} {pg}")
+        else:
+            with closing(self._connect_sqlite()) as conn:
+                have = {r[1] for r in conn.execute("PRAGMA table_info(predictions)")}
+                with conn:
+                    for name, (lite, _) in ARRIVAL_COLUMNS.items():
+                        if name not in have:
+                            conn.execute(f"ALTER TABLE predictions ADD COLUMN {name} {lite}")
+        self._arr_cols_ready = True
+
+    def write_itinerary(self, rows: list) -> None:
+        """Insert one row per connection into itinerary_predictions. Raises on failure; use safe_write_itinerary."""
+        if not rows:
+            return
+        if self.database_url:
+            with self._connect_pg() as conn:
+                if not getattr(self, "_itin_ready", False):
+                    for stmt in _ITIN_PG_DDL:
+                        conn.execute(stmt)
+                    self._itin_ready = True
+                for r in rows:
+                    conn.execute(f"INSERT INTO itinerary_predictions ({', '.join(ITIN_COLUMNS)}) "
+                                 f"VALUES ({', '.join(['%s'] * len(ITIN_COLUMNS))})", [r[c] for c in ITIN_COLUMNS])
+        else:
+            self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+            with closing(self._connect_sqlite()) as conn:
+                conn.executescript(_ITIN_SQLITE_DDL)
+                with conn:
+                    for r in rows:
+                        v = dict(r)
+                        v["ts_utc"] = v["ts_utc"].isoformat()
+                        v["leg_flight_ids"] = json.dumps(v["leg_flight_ids"])
+                        v["validated"] = int(v["validated"])
+                        conn.execute(f"INSERT INTO itinerary_predictions ({', '.join(ITIN_COLUMNS)}) "
+                                     f"VALUES ({', '.join(['?'] * len(ITIN_COLUMNS))})", [v[c] for c in ITIN_COLUMNS])
+
+    def safe_write_itinerary(self, rows: list) -> None:
+        try:
+            self.write_itinerary(rows)
+        except Exception as e:
+            logger.warning(f"Itinerary log write failed: {type(e).__name__}: {e}")
+
     def write(self, rec: dict) -> None:
         """Insert one row. Raises on failure; use safe_write for best-effort."""
         self._ensure_schema()
-        cols = ", ".join(COLUMNS)
+        extra = [c for c in ARRIVAL_COLUMNS if rec.get(c) is not None]
+        if extra:
+            self._ensure_arrival_columns()
+        cols_list = COLUMNS + extra
+        cols = ", ".join(cols_list)
         row = dict(rec)
         if self.database_url:
             from psycopg.types.json import Jsonb
@@ -208,8 +295,8 @@ class PredictionStore:
                     row[k] = Jsonb(json.loads(_dumps(row[k])))
             with self._connect_pg() as conn:
                 conn.execute(
-                    f"INSERT INTO predictions ({cols}) VALUES ({', '.join(['%s'] * len(COLUMNS))})",
-                    [row[c] for c in COLUMNS])
+                    f"INSERT INTO predictions ({cols}) VALUES ({', '.join(['%s'] * len(cols_list))})",
+                    [row[c] for c in cols_list])
         else:
             for k in ("ts_utc", "sched_dep_local", "sched_dep_utc", "rates_as_of"):
                 if row[k] is not None:
@@ -220,8 +307,8 @@ class PredictionStore:
             with closing(self._connect_sqlite()) as conn:
                 with conn:
                     conn.execute(
-                        f"INSERT INTO predictions ({cols}) VALUES ({', '.join(['?'] * len(COLUMNS))})",
-                        [row[c] for c in COLUMNS])
+                        f"INSERT INTO predictions ({cols}) VALUES ({', '.join(['?'] * len(cols_list))})",
+                        [row[c] for c in cols_list])
 
     def safe_write(self, rec: dict) -> None:
         """Best-effort write with a circuit breaker: after BREAKER_THRESHOLD consecutive

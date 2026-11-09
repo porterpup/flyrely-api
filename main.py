@@ -25,6 +25,7 @@ API Endpoints:
 
 import math
 import os
+import sys
 import json
 import csv
 import time
@@ -47,6 +48,8 @@ from pydantic import BaseModel, ConfigDict, Field
 import codeshare
 import prediction_log
 import aviation_weather
+from arrival_service import ArrivalService, arrival_block
+from flyrely_dist.providers import LegSpec
 from admin_auth import require_admin
 from flyrely_features import stations  # read-only: ICAO ids for METAR/TAF lookups
 
@@ -201,6 +204,8 @@ class FlightRequest(BaseModel):
     airline: Optional[str] = Field(None, description="Ticketing airline code (e.g., 'AA', 'DL', 'UA')")
     flight_number: Optional[str] = Field(None, description="Ticketed flight number, e.g. '1234' or 'DL1234'; "
                                                            "used to find the operating carrier")
+    arrival_time: Optional[datetime] = Field(None, description="Scheduled local arrival time (ISO, no offset). "
+                                                               "Echoed back; the model does not use it")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -267,6 +272,10 @@ class PredictionResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
     model_version: str
+
+    # Only present when the arrival flag is on (null then means the ladder is unavailable); arrival_time only when sent
+    arrival_time: Optional[str] = None
+    arrival: Optional[dict] = None
 
 # =============================================================================
 # Weather Service
@@ -540,6 +549,12 @@ class ModelService:
 
 model_service = ModelService()
 
+# Arrival ladder (plan: backtest/PLAN_ARRIVAL_AND_CONNECTIONS.md 2.3). Both flags are OFF by default, and the ladder is
+# not even loaded unless one is on, so nothing about /predict changes until Sean turns them on after evaluation (T5).
+ARRIVAL_FLAG = os.getenv("FLYRELY_FEATURE_ARRIVAL") == "1"
+ITINERARY_FLAG = os.getenv("FLYRELY_FEATURE_ITINERARY") == "1"
+arrival_service = ArrivalService(feature_fn=lambda *a: build_features(*a), enabled=ARRIVAL_FLAG or ITINERARY_FLAG)
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -726,6 +741,7 @@ async def root():
         "model_version": MODEL_VERSION,
         "endpoints": {
             "POST /predict": "Predict delay risk for a flight",
+            "POST /predict/itinerary": "Connection risk for a multi-leg trip (only when the itinerary flag is on)",
             "GET /health": "Health check",
             "GET /usage": "Prediction usage summary",
             "GET /usage/export": "Prediction usage log (CSV)",
@@ -741,6 +757,7 @@ async def health_check():
         "status": "healthy" if model_loaded else "degraded",
         "model_loaded": model_loaded,
         "severity_model_loaded": model_service.severity_model is not None,
+        "arrival_model_loaded": arrival_service.loaded,
         "weather_api_configured": bool(WEATHER_API_KEY),
         "weather_provider": weather_service.provider,
         "model_version": MODEL_VERSION,
@@ -836,14 +853,24 @@ def _weather_times(origin: str, destination: str, dep_local: datetime):
         return None, None
 
 
-@app.post("/predict", response_model=PredictionResponse)
+@app.post("/predict", response_model=PredictionResponse, response_model_exclude_unset=True)
 async def predict_delay(request: FlightRequest, background_tasks: BackgroundTasks):
     """
     Predict flight delay risk.
 
     Returns 503 {"detail": {"reason": "model_unavailable" | "prediction_failed", "message": ...}}
     when no real prediction can be made.
+
+    `exclude_unset`: every pre-existing field is always set explicitly, so the output is unchanged; the optional
+    `arrival` / `arrival_time` keys appear only when set (arrival flag on, or the request sent arrival_time).
     """
+    response, _ = await _predict_core(request, background_tasks)
+    return response
+
+
+async def _predict_core(request: FlightRequest, background_tasks: BackgroundTasks, need_forecast: bool = False):
+    """One leg's prediction. Returns (PredictionResponse, LegForecast or None). `need_forecast` (itineraries) makes a
+    missing ladder or a ladder failure a 503 instead of `arrival: null`."""
     flight_id = request.flight_id or f"srv-{uuid.uuid4().hex[:12]}"
     origin = request.origin.upper()
     destination = request.destination.upper()
@@ -885,6 +912,29 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
     delay_severity = model_service.predict_severity(features)
     model_ms = round((time.perf_counter() - start) * 1000)
 
+    forecast = None
+    arrival_set = False
+    arrival = None
+    if need_forecast or ARRIVAL_FLAG:
+        try:
+            if not arrival_service.loaded:
+                raise PredictionUnavailable("model_unavailable",
+                                            arrival_service.load_error or "arrival model not loaded")
+            try:
+                forecast = arrival_service.forecast([LegSpec(origin, destination, dep_time, model_airline)])[0]
+            except PredictionUnavailable:
+                raise
+            except Exception as e:
+                raise PredictionUnavailable("prediction_failed", f"{type(e).__name__}: {e}")
+        except PredictionUnavailable as e:
+            logger.error(f"[predict] {flight_id}: arrival {e.reason}: {e.message}")
+            if need_forecast:
+                raise HTTPException(status_code=503, detail={"reason": e.reason, "message": e.message})
+            warnings.append("Arrival forecast unavailable")
+        arrival_set = True
+        if forecast is not None:
+            arrival = arrival_block(forecast, arrival_service.version, model_service._probability_to_risk)
+
     dep_utc, arr_utc = _weather_times(origin, destination, dep_time)
     weather_origin, weather_dest = await weather_service.get_weather_pair(
         [(origin, dep_utc), (destination, arr_utc)])
@@ -915,11 +965,19 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
             operating_number=operator["operating_flight_number"] if operator else None,
             delay_probability=round(probability, 3), risk_level=risk_level,
             model_version=MODEL_VERSION, features=features,
-            weather_available=weather_origin is not None and weather_dest is not None))
+            weather_available=weather_origin is not None and weather_dest is not None,
+            arr_probability=round(forecast.arr.prob_late(15), 3) if forecast else None,
+            cancel_probability=round(forecast.p_cancel, 4) if forecast else None,
+            arr_model_version=arrival_service.version if forecast else None))
     except Exception as e:
         logger.warning(f"Prediction log record build failed: {e}")
 
-    return PredictionResponse(
+    extra = {}
+    if request.arrival_time is not None:
+        extra["arrival_time"] = request.arrival_time.replace(tzinfo=None).isoformat()
+    if arrival_set:
+        extra["arrival"] = arrival
+    response = PredictionResponse(
         flight_id=flight_id,
         risk_level=risk_level,
         delay_probability=round(probability, 3),
@@ -940,7 +998,9 @@ async def predict_delay(request: FlightRequest, background_tasks: BackgroundTask
         recommendations=recommendations,
         warnings=warnings,
         model_version=MODEL_VERSION,
+        **extra,
     )
+    return response, forecast
 
 
 # =============================================================================
@@ -968,6 +1028,10 @@ def _search_factors(origin: str, destination: str, dep_time: datetime, airline: 
 
 flight_lookup.mount(app, score_many=_score_many, scored_airlines=AIRLINE_DELAY_RATES, unavailable=PredictionUnavailable,
                     known_airports=set(AIRPORT_COORDS), factors_for=_search_factors)
+
+if ITINERARY_FLAG:
+    import itinerary
+    itinerary.mount(app, sys.modules[__name__])
 
 if os.getenv("FLYRELY_FEATURE_DISRUPTION_COPILOT") == "1":
     from copilot import mount as _copilot_mount

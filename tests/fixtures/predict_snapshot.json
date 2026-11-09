@@ -1,0 +1,91 @@
+{
+ "codeshare": {
+  "body": {
+   "airline": "UA",
+   "confidence": 0.92,
+   "delay_probability": 0.08,
+   "delay_severity": {
+    "expected_delay_label": "minor",
+    "expected_delay_range": "15\u201344 min",
+    "minor_pct": 0.449,
+    "moderate_pct": 0.315,
+    "severe_pct": 0.236
+   },
+   "departure_time": "2030-11-15T07:05:00",
+   "destination": "LAX",
+   "destination_weather": null,
+   "flight_id": "snap-2",
+   "flight_number": "5521",
+   "model_version": "bts18-gb-calib-v2",
+   "operating_airline": "OO",
+   "operating_airline_name": "SkyWest Airlines",
+   "operating_flight_number": "5521",
+   "origin": "DEN",
+   "origin_weather": null,
+   "recommendations": [
+    "Flight conditions look favorable"
+   ],
+   "risk_factors": [
+    "Early-morning flights are rarely delayed",
+    "DEN and LAX are busy airports, where delays spread more easily"
+   ],
+   "risk_level": "low",
+   "warnings": [],
+   "weather_available": false
+  },
+  "request": {
+   "airline": "UA",
+   "departure_time": "2030-11-15T07:05:00",
+   "destination": "LAX",
+   "flight_id": "snap-2",
+   "flight_number": "UA5521",
+   "origin": "DEN"
+  },
+  "status": 200
+ },
+ "plain": {
+  "body": {
+   "airline": "AA",
+   "confidence": 0.785,
+   "delay_probability": 0.215,
+   "delay_severity": {
+    "expected_delay_label": "minor",
+    "expected_delay_range": "15\u201344 min",
+    "minor_pct": 0.403,
+    "moderate_pct": 0.36,
+    "severe_pct": 0.238
+   },
+   "departure_time": "2030-11-15T18:30:00",
+   "destination": "LAX",
+   "destination_weather": null,
+   "flight_id": "snap-1",
+   "flight_number": null,
+   "model_version": "bts18-gb-calib-v2",
+   "operating_airline": null,
+   "operating_airline_name": null,
+   "operating_flight_number": null,
+   "origin": "JFK",
+   "origin_weather": null,
+   "recommendations": [
+    "Monitor flight status closer to departure",
+    "Have a backup plan for tight connections"
+   ],
+   "risk_factors": [
+    "Evening flights are more often delayed, as delays build up during the day",
+    "JFK and LAX are busy airports, where delays spread more easily",
+    "Origin airport has high historical delay rate (26%)"
+   ],
+   "risk_level": "medium",
+   "warnings": [],
+   "weather_available": false
+  },
+  "request": {
+   "airline": "AA",
+   "departure_time": "2030-11-15T18:30:00",
+   "destination": "LAX",
+   "flight_id": "snap-1",
+   "origin": "JFK"
+  },
+  "status": 200
+ }
+}
