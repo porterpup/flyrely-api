@@ -92,3 +92,22 @@ Sensitivity (report only): M ± 10 min.
   - If C1–C3 fail, no connection numbers are shown.
 
 **Outputs.** `backtest/results/arrival_connections.json`, `backtest/REPORT_ARRIVAL_CONNECTIONS.md`, and the artifacts `models/arrival_ladder_v1.joblib`, `models/connection_dependence_v1.json`, `models/mct_defaults.csv`. The run is done once. Any re-run after a bug fix is reported as an amendment, with the reason.
+
+---
+
+## Clarifications and disclosures (2026-11-09, added before any evaluation code ran on 2026 months)
+
+These add detail the protocol left open. They change no threshold, split or decision rule above.
+
+1. **Pair buckets (section 3 of the plan).** Written as `[M, M+30), [M+30, M+60), [M+60, 120), [120, 240]`, implemented literally in `backtest/pairs.py` (for M = 40: 40-70, 70-100, 100-120, 120-240). Checked against intent: the plan wants tight connections oversampled, and the second bucket cannot be `[M+30, 60)` because that is empty for every M >= 30. The literal reading is the only coherent one, so no change is needed. Because every metric can be reweighted by the bucket weight `w`, the choice does not bias the reweighted numbers.
+2. **Disclosure.** While building the proxy pairs (T2, 2026-11-09), `pairs.py` printed the unweighted proxy miss rate per month for all 20 months, including the 2026 evaluation months (about 7% to 10% in every month). No design choice, threshold or rule depended on those numbers, and they were not examined beyond the log line.
+3. **Primary population.** Gating metrics (C1 to C6) use the stratified proxy sample as drawn (unweighted). Metrics reweighted to the all-pairs layover mix (by `w`) are reported next to them, not gated. Dependence rho, the P(miss) isotonic recalibration and baseline B-L are fitted unweighted.
+4. **Layover buckets for C3** are the three used for rho (< 60, 60-120, 120-240 min). The four sampling buckets are reported, not gated.
+5. **Bootstrap.** All "95% day-block bootstrap" intervals resample whole scheduled-arrival days (arrival date of leg 1 for pairs, flight date for legs), 1,000 resamples, seed 42, percentile interval.
+6. **PIT for rho:** delays are integers; the PIT is randomised uniformly within [F(x), F(x+1)) with seed 42; cancelled legs and diverted leg 1 are excluded from the rho fit.
+7. **B-L:** empirical miss rate by hub x floor(layover / 5) from the 2025-07..12 proxy pairs; an unseen cell falls back to that layover bucket's overall rate across hubs.
+8. **C6** requires the observed rate to be non-decreasing across the non-empty display bands in every month, and strictly lower in the lowest than the highest band.
+9. **M +/- 10 sensitivity** is recomputed (and the label rebuilt with the shifted M) on a seeded 10% sample of the 2026 pairs.
+10. **--quick mode** reads 2025 months only (evaluation on 2025-11..12, which the models have already seen, so the numbers are a smoke test and never a result), writes `arrival_connections_quick.json`, and uses a 5% pair sample.
+11. **P(miss) is never evaluated or served for through flights**, which are not in the proxy pairs.
+12. **Arrival label** for metrics: flown flights with a recorded ArrDelay, diverted counted as late at every threshold. Flights flown but missing ArrDelay (not cancelled, not diverted) are dropped.
