@@ -40,3 +40,27 @@ def build_defaults(departures_2025: pd.Series) -> pd.DataFrame:
 def load_table(path) -> dict[str, int]:
     df = pd.read_csv(path)
     return dict(zip(df["airport"], df["mct_minutes"].astype(int)))
+
+
+CROSS_NETWORK_EXTRA = 30
+_SOURCE_BY_CLASS = {"large_campus": "default_large_campus", "top30": "default_top30", "mid": "default_mid",
+                    "small": "default_small"}
+
+
+def resolve_mct(airport: str, table: dict | None = None, user_minutes: int | None = None,
+                cross_network: bool = False, deps_per_day: float | None = None) -> tuple[int, str]:
+    """(minutes, source) for one connection. A user override wins and is reported as source "user". Without a table
+    the class comes from the frozen lists (airports outside them count as small). Different marketing networks add
+    30 minutes (such connections are never validated, so the number is for display only)."""
+    if user_minutes is not None:
+        return int(user_minutes), "user"
+    if table is not None and airport in table:
+        minutes = int(table[airport])
+        cls = "large_campus" if airport in LARGE_CAMPUS else "top30" if airport in TOP30 else \
+              "mid" if minutes == 35 else "small"
+    else:
+        minutes, cls = classify(airport, deps_per_day if deps_per_day is not None else 0.0)
+    source = _SOURCE_BY_CLASS[cls]
+    if cross_network:
+        return minutes + CROSS_NETWORK_EXTRA, source + "+cross_network"
+    return minutes, source
