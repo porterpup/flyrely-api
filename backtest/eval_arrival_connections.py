@@ -518,7 +518,11 @@ def connection_evaluation(store, cfg, log):
     res["diagnostic_classifier_D"] = diag_eval(diag, ev, pm)
     res["sensitivity_mct_pm10"] = sensitivity(store, cfg, val, variant, final_dm, final_iso)
     res["_final_dm"] = {"variant": variant, "global_rho": final_dm.global_rho,
-                        "by_cell": {k: list(v) for k, v in final_dm.by_cell.items()}, "shrink_n": final_dm.shrink_n}
+                        "by_cell": {k: list(v) for k, v in final_dm.by_cell.items()}, "shrink_n": final_dm.shrink_n,
+                        "recalibration": None if final_iso is None else
+                        {"type": "isotonic", "x": final_iso.X_thresholds_.tolist(), "y": final_iso.y_thresholds_.tolist()},
+                        "chosen": chosen, "decision_outcome": res["decisions"]["outcome"],
+                        "protocol": "backtest/PROTOCOL_ARRIVAL_CONNECTIONS.md"}
     return res
 
 
@@ -725,6 +729,10 @@ def main(argv=None):
     RESULTS.mkdir(exist_ok=True)
     (RESULTS / cfg["out"]).write_text(json.dumps(jsonable(R), indent=1) + "\n")
     if not args.quick:
+        # connection_dependence_v1.json: {variant, global_rho, by_cell: {"HUB|bucket": [rho, n]}, shrink_n} plus
+        # recalibration/decision fields the API loader ignores. Written only by the full run.
+        (ROOT / "models" / "connection_dependence_v1.json").write_text(
+            json.dumps(jsonable(R["connections"]["_final_dm"]), indent=1) + "\n")
         (Path(__file__).resolve().parent / "REPORT_ARRIVAL_CONNECTIONS.md").write_text(render_report(R))
     print("arrival outcome:", R["arrival"]["decisions"]["outcome"])
     print("connection outcome:", R["connections"]["decisions"]["outcome"])
