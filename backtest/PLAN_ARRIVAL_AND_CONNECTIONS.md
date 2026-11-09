@@ -286,7 +286,7 @@ Direct flight:
 Connecting trip: legs stacked, with a connection row between them.
 - Connection row:
   - **"Connection in Denver · 53 min"**, with sub-text "Minimum we assume: 40 min (change)".
-  - **"Chance of missing it: 11% (about 1 in 9)"**.
+  - **"Chance of missing it: 11%"**.
   - Info line: "Counts the chance your first flight lands late, and that your next flight leaves late too."
 - When a connection isn't validated: "We haven't tested connections like this one (different airlines), so we don't show a number."
 - Through flight: "Same flight number continues. Usually the same plane."
@@ -498,11 +498,13 @@ Sensitivity (report only): M ± 10 min.
 
 ## 8. Decisions for Sean
 
-- **D1.** MCT defaults (30/35/40/50 min, plus the large-campus list), with a user override.
-- **D2.** How to show miss risk: percent plus "about 1 in N" (recommended), and the bands < 5% / 5–15% / ≥ 15%.
-- **D3.** Hide the number for connections between different airlines (recommended) or show it marked "not tested".
-- **D4.** Where to keep the ladder file (30–80 MB): in git, or gitignored with a sha256 manifest copied to the Mac mini (recommended).
-- **D5.** Whether arrival replaces departure as the headline for direct flights once A1–A3 pass (recommended yes, per your note).
+Answered 2026-11-09 (recorded in `PROTOCOL_ARRIVAL_CONNECTIONS.md`):
+
+- **D1.** Approved as recommended: MCT 30/35/40 min by airport size, 50 min at ATL ORD DFW DEN LAX JFK EWR IAH SFO CLT, with a user override.
+- **D2.** Show the percent only (no "about 1 in N"). The bands < 5% / 5-15% / >= 15% stay as labels and for rule C6.
+- **D3.** Decided: for cross-airline (separate-ticket) connections, hide the percentage and show a plain warning ("Separate airlines: if your first flight is late, the second won't wait. Allow at least 2-3 hours."). Display-only; it changes no evaluation.
+- **D4.** Approved: gitignored ladder file plus sha256 manifest, kept on the Mac mini.
+- **D5.** Approved: arrival becomes the headline for direct flights once A1-A3 pass.
 
 ## 9. Not verified
 
