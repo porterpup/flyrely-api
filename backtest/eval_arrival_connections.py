@@ -323,6 +323,7 @@ def arrival_evaluation(store, cfg, log):
     lr = recalibrated_arm(store, val)
     P_L = W["P"].astype(float)
     P_LR = np.concatenate([lr[m][0] for m in val])
+    del lr                                                             # per-month copies (memory)
     k15 = list(L.ARR_THRESHOLDS).index(15)
     y15 = (W["y"] >= 15).astype(float)
     sel = np.isin(W["ym"], months_between(*cfg["select"]))
@@ -427,11 +428,15 @@ def pit_sample(store, pairs, dep_model=None):
     return z1, z2, P["hub"].to_numpy()[ok], P["layover"].to_numpy()[ok]
 
 
-def score_month(store, ym, cfg, rho_models: dict, m_shift=0, subsample=None):
-    """P(miss) for every proxy pair of month ym under each dependence model, plus labels and features."""
+def score_month(store, ym, cfg, rho_models: dict, m_shift=0, subsample=None, operated_only=False):
+    """P(miss) for every proxy pair of month ym under each dependence model, plus labels and features.
+    P(miss) is conditional on both legs operating, so everything fitted or scored against `miss` uses the pairs
+    where both legs operated (`operated_only=True`, or the `op` mask); P(disrupted) uses every pair (clarification 15)."""
     pairs = load_pairs(ym, cfg["frac"])
     if subsample is not None:
         pairs = pairs.sample(frac=subsample, random_state=SEED)
+    if operated_only:
+        pairs = pairs[~pairs["c1"].to_numpy(bool) & ~pairs["c2"].to_numpy(bool)]
     g = gather_pairs(store, pairs)
     P = pairs.loc[g["index"]]
     lay, M = P["layover"].to_numpy().astype(int), P["M"].to_numpy().astype(int) + m_shift
@@ -443,10 +448,15 @@ def score_month(store, ym, cfg, rho_models: dict, m_shift=0, subsample=None):
     arr_curve_s1 = C.sf_at(g["armP"].astype(float), L.ARR_THRESHOLDS, store.bundle.arr_tail, (lay - M).astype(float))
     dep_s0 = g["depP"][:, th_d.index(0)].astype(float)
     return {"p": {k: v.astype(np.float32) for k, v in p.items()}, "miss": miss, "disrupted": disr,
-            "c1p": g["c1"], "c2p": g["c2"], "layover": lay, "M": M, "bucket": P["bucket"].to_numpy(),
+            "c1p": g["c1"], "c2p": g["c2"], "op": ~P["c1"].to_numpy(bool) & ~P["c2"].to_numpy(bool),
+            "layover": lay, "M": M, "bucket": P["bucket"].to_numpy(),
             "w": P["w"].to_numpy(float), "hub": P["hub"].to_numpy(), "network": P["network"].to_numpy(),
             "ym": np.full(len(P), ym), "day": P["arr_date"].to_numpy().astype("datetime64[D]").astype(int),
             "same_carrier": g["same_carrier"], "hour2": g["hour2"], "s1": arr_curve_s1, "s2_0": dep_s0}
+
+
+def subset(b, m):
+    return {k: ({n: a[m] for n, a in v.items()} if k == "p" else v[m]) for k, v in b.items()}
 
 
 def cat(blocks):
@@ -470,8 +480,8 @@ def connection_evaluation(store, cfg, log):
     log(f"rho fit on {len(z1)} pairs: global {dm['R1'].global_rho:.3f}")
     # 2. score fit and selection months under all three variants; isotonic per variant on the fit months
     from sklearn.isotonic import IsotonicRegression
-    fit_blocks = cat([score_month(store, ym, cfg, dm) for ym in rho_fit])
-    sel_blocks = cat([score_month(store, ym, cfg, dm) for ym in rho_sel])
+    fit_blocks = cat([score_month(store, ym, cfg, dm, operated_only=True) for ym in rho_fit])
+    sel_blocks = cat([score_month(store, ym, cfg, dm, operated_only=True) for ym in rho_sel])
     isos = {v: IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1).fit(fit_blocks["p"][v], fit_blocks["miss"].astype(float))
             for v in dm}
     sel_scores = {}
@@ -495,7 +505,8 @@ def connection_evaluation(store, cfg, log):
             allb = cat([fit_blocks, sel_blocks])
             final_iso = IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1).fit(allb["p"]["R0"], allb["miss"].astype(float))
         else:
-            allb = cat([score_month(store, ym, cfg, {variant: final_dm}) for ym in rho_fit + rho_sel])
+            allb = cat([score_month(store, ym, cfg, {variant: final_dm}, operated_only=True)
+                        for ym in rho_fit + rho_sel])
             final_iso = IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1).fit(allb["p"][variant], allb["miss"].astype(float))
     base_blocks = cat([fit_blocks, sel_blocks])
     # baseline B-L from 2025-07..12 pairs (unweighted)
@@ -503,6 +514,7 @@ def connection_evaluation(store, cfg, log):
     # diagnostic classifier D on 2025-07..09 pairs
     diag = diagnostic_classifier(fit_blocks)
     del fit_blocks, sel_blocks, base_blocks
+    allb = None
     # 4. evaluation months
     models = {variant: final_dm, "R0": dm["R0"]}
     ev = cat([score_month(store, ym, cfg, models) for ym in val])
@@ -515,7 +527,7 @@ def connection_evaluation(store, cfg, log):
     res["chosen_variant"] = chosen
     res["rho"] = {"variant": variant, "global": final_dm.global_rho, "cells": len(final_dm.by_cell),
                   "fit_n_2025_07_09": int(len(z1))}
-    res["diagnostic_classifier_D"] = diag_eval(diag, ev, pm)
+    res["diagnostic_classifier_D"] = diag_eval(diag, subset(ev, ev["op"]), pm[ev["op"]])
     res["sensitivity_mct_pm10"] = sensitivity(store, cfg, val, variant, final_dm, final_iso)
     res["_final_dm"] = {"variant": variant, "global_rho": final_dm.global_rho,
                         "by_cell": {k: list(v) for k, v in final_dm.by_cell.items()}, "shrink_n": final_dm.shrink_n,
@@ -581,9 +593,15 @@ def group_table(y, p, labels, min_n=1):
 
 
 def connection_metrics(ev, pm, p_i, p_bl):
+    """P(disrupted) (C5) on every pair; all P(miss) metrics on the pairs where both legs operated."""
+    pdis = 1 - (1 - ev["c1p"].astype(float)) * (1 - ev["c2p"].astype(float)) * (1 - pm)
+    yd = ev["disrupted"].astype(float)
+    n_all = int(len(yd))
+    op = ev["op"]
+    ev, pm, p_i, p_bl = subset(ev, op), pm[op], p_i[op], p_bl[op]
     y = ev["miss"].astype(float)
     w = ev["w"]
-    res = {"n_pairs": int(len(y)), "observed_miss_rate": float(y.mean()),
+    res = {"n_pairs_all": n_all, "n_pairs": int(len(y)), "observed_miss_rate": float(y.mean()),
            "weighted_observed_miss_rate": float(np.average(y, weights=w))}
     res["model"] = binary_metrics(y, pm)
     res["weighted"] = {"brier": float(np.average((pm - y) ** 2, weights=w)), "ece": weighted_ece(y, pm, w),
@@ -609,9 +627,7 @@ def connection_metrics(ev, pm, p_i, p_bl):
                                "mean_pred": float(pm[m].mean()), "observed": float(y[m].mean())}
         months_ok &= e <= 0.03
     res["by_same_carrier"] = group_table(y, pm, np.where(ev["same_carrier"], "same_operating_carrier", "different"))
-    # trip level
-    pdis = 1 - (1 - ev["c1p"].astype(float)) * (1 - ev["c2p"].astype(float)) * (1 - pm)
-    yd = ev["disrupted"].astype(float)
+    # trip level (all pairs)
     res["disrupted"] = binary_metrics(yd, pdis)
     # decisions
     mm = res["model"]
@@ -643,12 +659,35 @@ def connection_metrics(ev, pm, p_i, p_bl):
 def sensitivity(store, cfg, val, variant, final_dm, final_iso):
     out = {}
     for d in (-10, 10):
-        b = cat([score_month(store, ym, cfg, {variant: final_dm}, m_shift=d, subsample=0.10) for ym in val])
+        b = cat([score_month(store, ym, cfg, {variant: final_dm}, m_shift=d, subsample=0.10, operated_only=True)
+                 for ym in val])
         p = final_iso.predict(b["p"][variant]) if final_iso is not None else b["p"][variant].astype(float)
         m = binary_metrics(b["miss"].astype(float), np.asarray(p, dtype=float))
         m.pop("deciles", None)
         out[f"M{d:+d}"] = m
     return out
+
+
+# ------------------------------------------------------------------ combined outcome
+
+# Arrival outcomes under which the ladder may be used inside the connection engine (protocol "Arrival decision
+# rules"): A1-A3 pass, or A1 and A4 pass with A2 failing. In every other case ("If A1 fails, nothing is shipped") the
+# copula P(miss), which is built on the ladder, is not served either. Clarification 16.
+LADDER_USABLE_FOR_CONNECTIONS = ("ship_arrival_in_predict_and_headline", "ladder_inside_connection_engine_only")
+COPULA_SHIP = "ship_miss_probability_for_validated_connections"
+
+
+def apply_arrival_gate(arrival, conn):
+    """Final connection outcome: the C-rule outcome, except that copula numbers are withheld when the arrival
+    ladder itself may not be used. The layover-table fallback (B-L) does not use the ladder and is left as decided.
+    Writes decisions["final_outcome"] and the dependence file's decision_outcome (read by the API loader)."""
+    a_out, c_out = arrival["decisions"]["outcome"], conn["decisions"]["outcome"]
+    usable = a_out in LADDER_USABLE_FOR_CONNECTIONS
+    final = c_out if (usable or c_out != COPULA_SHIP) else "no_connection_numbers_arrival_ladder_not_shipped"
+    conn["decisions"]["arrival_gate"] = {"arrival_outcome": a_out, "ladder_usable": usable}
+    conn["decisions"]["final_outcome"] = final
+    conn["_final_dm"]["decision_outcome"] = final
+    return final
 
 
 # ------------------------------------------------------------------ report
@@ -667,7 +706,8 @@ def render_report(R):
         for t, m in rep["thresholds"].items():
             L_.append(f"| {arm} | {t} | {m.get('auc', float('nan')):.3f} | {m['brier']:.4f} | {m['ece']:.4f} | "
                       f"{m['max_decile_gap']:.4f} |")
-    L_ += ["", "## Connections", f"Variant: **{c['chosen_variant']}**. Outcome: **{c['decisions']['outcome']}**.", ""]
+    L_ += ["", "## Connections", f"Variant: **{c['chosen_variant']}**. Outcome (C rules): **{c['decisions']['outcome']}**; "
+           f"after the arrival gate: **{c['decisions'].get('final_outcome', c['decisions']['outcome'])}**.", ""]
     for r in ("C1", "C2", "C3", "C4", "C5", "C6"):
         L_.append(f"- {r}: {'PASS' if c['decisions'][r]['pass'] else 'FAIL'}")
     m = c["model"]
@@ -713,6 +753,7 @@ def run(cfg, log=print):
     log(f"arrival done {time.time() - t0:.0f}s")
     conn = connection_evaluation(store, cfg, log)
     log(f"connections done {time.time() - t0:.0f}s")
+    apply_arrival_gate(arrival, conn)
     return {"meta": {"protocol": "backtest/PROTOCOL_ARRIVAL_CONNECTIONS.md", "mode": cfg["name"],
                      "run_date": pd.Timestamp.today().strftime("%Y-%m-%d"),
                      "artifact_sha256": store.sha, "val_months": [cfg["val"][0], cfg["val"][1]],
@@ -735,7 +776,8 @@ def main(argv=None):
             json.dumps(jsonable(R["connections"]["_final_dm"]), indent=1) + "\n")
         (Path(__file__).resolve().parent / "REPORT_ARRIVAL_CONNECTIONS.md").write_text(render_report(R))
     print("arrival outcome:", R["arrival"]["decisions"]["outcome"])
-    print("connection outcome:", R["connections"]["decisions"]["outcome"])
+    print("connection outcome:", R["connections"]["decisions"]["outcome"],
+          "-> final:", R["connections"]["decisions"]["final_outcome"])
 
 
 if __name__ == "__main__":

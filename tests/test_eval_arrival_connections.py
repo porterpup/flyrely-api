@@ -84,3 +84,34 @@ def test_run_is_refused_when_unlock_variable_set(monkeypatch):
     monkeypatch.setenv("FLYRELY_HOLDOUT_UNLOCK", "2026-09")
     with pytest.raises(SystemExit):
         E.run(E.QUICK)
+
+
+def test_arrival_gate_withholds_copula_numbers_when_ladder_not_shipped():
+    def mk(a_out, c_out):
+        return ({"decisions": {"outcome": a_out}},
+                {"decisions": {"outcome": c_out}, "_final_dm": {"decision_outcome": c_out}})
+    for a_out in E.LADDER_USABLE_FOR_CONNECTIONS:
+        a, c = mk(a_out, E.COPULA_SHIP)
+        assert E.apply_arrival_gate(a, c) == E.COPULA_SHIP and c["_final_dm"]["decision_outcome"] == E.COPULA_SHIP
+    for a_out in ("ship_nothing_arrival", "ship_nothing_arrival_other"):
+        a, c = mk(a_out, E.COPULA_SHIP)
+        assert E.apply_arrival_gate(a, c) == "no_connection_numbers_arrival_ladder_not_shipped"
+        assert c["_final_dm"]["decision_outcome"] != E.COPULA_SHIP
+        a, c = mk(a_out, "serve_layover_table_B-L_itin-layover-table-v1")       # B-L uses no ladder
+        assert E.apply_arrival_gate(a, c) == "serve_layover_table_B-L_itin-layover-table-v1"
+
+
+def test_connection_metrics_score_miss_on_operated_pairs_only():
+    n = 4000
+    rng = np.random.default_rng(1)
+    pm = rng.uniform(0.01, 0.4, n)
+    op = rng.random(n) > 0.2                                    # 20% of pairs have a cancelled leg
+    miss = op & (rng.random(n) < pm)                            # calibrated given both legs operate
+    ev = {"miss": miss, "disrupted": miss | ~op, "op": op, "w": np.ones(n), "layover": rng.integers(40, 240, n),
+          "bucket": rng.integers(0, 4, n), "hub": np.array(["DEN", "ATL"] * (n // 2)), "ym": np.full(n, "2025-11"),
+          "same_carrier": np.ones(n, bool), "c1p": np.full(n, 0.1), "c2p": np.full(n, 0.1),
+          "day": np.repeat(np.arange(40), n // 40), "p": {"R1": pm}}
+    res = E.connection_metrics(ev, pm, pm, pm)
+    assert res["n_pairs"] == int(op.sum()) and res["n_pairs_all"] == n
+    assert res["observed_miss_rate"] == pytest.approx(miss[op].mean())
+    assert res["disrupted"]["n"] == n
