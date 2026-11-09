@@ -2,6 +2,18 @@
 
 Protocol: `backtest/PROTOCOL_ARRIVAL_CONNECTIONS.md`. Run on 2026-11-09, artifact sha256 `eec7f6b98e25f7da9450258fbb9f524b4e3cc91693491869cec9edec7fb8f53c`. Evaluation months ['2026-01', '2026-08']. This file is generated from `results/arrival_connections.json`; prose is added at review.
 
+## Plain summary
+
+The registered evaluation ran once on 2026-11-09 (946 s, 4.6 GB peak memory) on Jan to Aug 2026. **Nothing from it ships: no arrival number and no missed-connection number is shown to users.**
+
+- **Arrival (A1 to A4).** The arrival model fails calibration (A1) and is not better than today's departure number used as an arrival forecast (A2). It passes tier ordering (A3) and distribution skill (A4). By the pre-registered rule, arrival is not shipped and direct flights keep the departure headline (D5 does not trigger).
+- **Why A1 fails: the level shift.** The model predicts that 19.5% of flights arrive 15+ minutes late; 23.6% actually did. Predictions run about 4 points too low across 2026, the same shift seen for departures in earlier work. ECE at 15 minutes is 0.041 (limit 0.02), the largest decile gap 0.059 (limit 0.04), and only 4 of 8 months meet the monthly limit (March is worst at 0.073). The walk-forward recalibration arm (L-R) cuts ECE to 0.021, still just over the limit, and it did not win the pre-registered arm choice, so arm L was evaluated as the served arm. The model still beats a constant climatology forecast (A2 against climatology passes) and ranks flights as expected (AUC about 0.647), but today's departure probability scores a Brier 0.0031 lower, mostly because it is better centred.
+- **Connections (C1 to C6).** The connection model itself passed every rule: ECE 0.008 (limit 0.015), monthly ECE at most 0.017, every layover bucket within 0.02, Brier below the layover-table baseline (difference -0.00107, CI entirely below 0), trip-level ECE 0.017, and the display bands ordered in every month. The rule outcome was `ship_miss_probability_for_validated_connections`.
+- **Final outcome.** Clarification 16 (approved before the run) withholds connection numbers unless the arrival ladder is allowed to ship, because the connection model is built on the arrival ladder. Arrival failed A1 and A2, so the final outcome is `no_connection_numbers_arrival_ladder_not_shipped`. This was accepted as scored; the rule is not relaxed after seeing the result.
+- **How much the copula adds.** The gain over simple baselines is small: Brier 0.0755 against 0.0765 for the layover table and 0.0755 for the independence variant. The proxy pairs are not booked passengers (no gates, terminals or airline-protected connections).
+
+Any follow-up (for example a tighter recalibration arm, or a calibration month closer to the evaluation period) needs a new dated protocol amendment with its reason before it is run, and a decision from Sean. No re-run before 2026-11-21.
+
 ## Arrival
 Served arm: **L**. Outcome: **ship_nothing_arrival**.
 
