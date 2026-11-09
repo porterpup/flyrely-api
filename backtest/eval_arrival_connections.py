@@ -771,7 +771,8 @@ def main(argv=None):
     (RESULTS / cfg["out"]).write_text(json.dumps(jsonable(R), indent=1) + "\n")
     if not args.quick:
         # connection_dependence_v1.json: {variant, global_rho, by_cell: {"HUB|bucket": [rho, n]}, shrink_n} plus
-        # recalibration/decision fields the API loader ignores. Written only by the full run.
+        # recalibration and decision_outcome. The API loader applies `recalibration`, and refuses a missing key or
+        # any decision_outcome other than ship_miss_probability_for_validated_connections. Full run only.
         (ROOT / "models" / "connection_dependence_v1.json").write_text(
             json.dumps(jsonable(R["connections"]["_final_dm"]), indent=1) + "\n")
         (Path(__file__).resolve().parent / "REPORT_ARRIVAL_CONNECTIONS.md").write_text(render_report(R))
