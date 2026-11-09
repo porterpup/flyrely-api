@@ -57,6 +57,23 @@ class DependenceModel:
         return float(w * r + (1 - w) * self.global_rho)
 
 
+    def rho_vector(self, hubs, layovers) -> np.ndarray:
+        """rho for many connections at once (same values as `rho`)."""
+        hubs = np.asarray(hubs)
+        lay = np.asarray(layovers, dtype=float)
+        if self.variant == "R0":
+            return np.zeros(len(hubs))
+        if self.variant == "R1":
+            return np.full(len(hubs), float(self.global_rho))
+        out = np.empty(len(hubs))
+        buckets = np.where(lay < 60, "lt60", np.where(lay < 120, "60_120", "120_240"))
+        keys = np.char.add(np.char.add(hubs.astype(str), "|"), buckets)
+        for k in np.unique(keys):
+            hub, b = k.split("|")
+            out[keys == k] = self.rho(hub, {"lt60": 30, "60_120": 90, "120_240": 180}[b])
+        return out
+
+
 def miss_probability(f1: LegForecast, f2: LegForecast, layover_min: float, mct_min: float,
                      dep: DependenceModel | None = None, hub: str | None = None, rho: float | None = None) -> float:
     """P(miss | both legs operate)."""
@@ -81,6 +98,43 @@ def _miss(arr_marginal, dep_marginal, s: float, rho: float) -> float:
         cond = _ndtr((z2 - rho * z1) / np.sqrt(1.0 - rho * rho))
         cond = np.where(f2 <= _EPS, 0.0, np.where(f2 >= 1 - _EPS, 1.0, cond))
     return float(np.clip((pmf * cond).sum() + tail_mass, 0.0, 1.0))
+
+
+def miss_batch(arm_P, dep_P, arm_tail, dep_tail, s, rhos: dict, chunk: int = 4000,
+               arm_thresholds=None, dep_thresholds=None, want_z: bool = False) -> dict:
+    """`_miss` for many connections: arm_P (n, 11) and dep_P (n, 10) are rearranged ladder rows, `s` the integer
+    slack (layover - MCT) per row, `rhos` a dict name -> rho (float or per-row array). Returns {name: P(miss)}."""
+    from .ladder import ARR_THRESHOLDS, DEP_THRESHOLDS
+    a_th = arm_thresholds or ARR_THRESHOLDS
+    d_th = dep_thresholds or DEP_THRESHOLDS
+    arm_P, dep_P = np.asarray(arm_P, dtype=float), np.asarray(dep_P, dtype=float)
+    s = np.asarray(s).astype(int)
+    n, G = len(s), len(GRID)
+    out = {k: np.empty(n) for k in rhos}
+    rho_arr = {k: np.broadcast_to(np.asarray(v, dtype=float), (n,)) for k, v in rhos.items()}
+    need_z = any(np.any(np.abs(v) > 1e-12) for v in rho_arr.values())
+    for lo in range(0, n, chunk):
+        sl = slice(lo, min(n, lo + chunk))
+        S1 = curve_matrix(arm_P[sl], a_th, arm_tail)
+        S2 = curve_matrix(dep_P[sl], d_th, dep_tail)
+        idx = np.clip(GRID[None, :] - s[sl, None] - GRID_LO, 0, G - 1)
+        f2 = 1.0 - np.take_along_axis(S2, idx, axis=1)
+        nxt = np.concatenate([S1[:, 1:], S1[:, -1:]], axis=1)
+        pmf = np.clip(S1 - nxt, 0.0, None)
+        tail = S1[:, -1]
+        if need_z:
+            z1 = _ppf(1.0 - (S1 + nxt) / 2.0)
+            z2 = _ppf(f2)
+        for k, r in rho_arr.items():
+            rr = r[sl]
+            if not np.any(np.abs(rr) > 1e-12):
+                cond = f2
+            else:
+                cond = _ndtr((z2 - rr[:, None] * z1) / np.sqrt(1.0 - rr * rr)[:, None])
+                cond = np.where(f2 <= _EPS, 0.0, np.where(f2 >= 1 - _EPS, 1.0, cond))
+                cond = np.where(np.abs(rr)[:, None] > 1e-12, cond, f2)
+            out[k][sl] = np.clip((pmf * cond).sum(axis=1) + tail, 0.0, 1.0)
+    return out
 
 
 def disruption_probability(p_cancel: list[float], misses: list[float]) -> float:
