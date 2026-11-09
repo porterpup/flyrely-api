@@ -6,7 +6,7 @@ Status: pre-registration, committed before any evaluation is run. Source: `backt
 
 - **D1 approved as recommended.** Default minimum connect times (MCT): 30 min at airports under 100 daily departures, 35 min at 100-400, 40 min at the top 30, 50 min at the large-campus list below. Users can override per connection. Source label `flyrely_default_estimate`.
 - **D2: show the percent only.** No "about 1 in N". The display bands (< 5%, 5-15%, >= 15%) are kept as labels and for rule C6.
-- **D3: not yet decided.** Provisional default: hide the miss number for connections between different airlines. This is **provisional and display-only**: it changes no model, metric, split or decision rule in this protocol. Proxy pairs are same-network only, so cross-airline connections are not evaluated in any case.
+- **D3 decided (Sean, 2026-11-09).** For cross-airline (separate-ticket) connections, hide the percentage and show a plain warning instead, e.g. "Separate airlines: if your first flight is late, the second won't wait. Allow at least 2-3 hours." This is **display-only**: it changes no model, metric, split or decision rule in this protocol. Proxy pairs are same-network only, so cross-airline connections are not evaluated in any case.
 - **D4 approved.** The ladder artifact is gitignored, with a sha256 manifest, and kept on the Mac mini.
 - **D5 approved.** Arrival becomes the headline for direct flights once A1-A3 pass.
 

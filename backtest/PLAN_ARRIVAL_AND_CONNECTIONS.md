@@ -502,7 +502,7 @@ Answered 2026-11-09 (recorded in `PROTOCOL_ARRIVAL_CONNECTIONS.md`):
 
 - **D1.** Approved as recommended: MCT 30/35/40 min by airport size, 50 min at ATL ORD DFW DEN LAX JFK EWR IAH SFO CLT, with a user override.
 - **D2.** Show the percent only (no "about 1 in N"). The bands < 5% / 5-15% / >= 15% stay as labels and for rule C6.
-- **D3.** Not yet decided (Sean asked for an explanation). Provisional default: hide the number for connections between different airlines. Display-only; it changes no evaluation.
+- **D3.** Decided: for cross-airline (separate-ticket) connections, hide the percentage and show a plain warning ("Separate airlines: if your first flight is late, the second won't wait. Allow at least 2-3 hours."). Display-only; it changes no evaluation.
 - **D4.** Approved: gitignored ladder file plus sha256 manifest, kept on the Mac mini.
 - **D5.** Approved: arrival becomes the headline for direct flights once A1-A3 pass.
 
