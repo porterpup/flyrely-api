@@ -17,6 +17,8 @@ ROWS = [
     "UA,648,STL,EWR,06:01,09:30,UA,648,127,31,2026-08",
     "UA,900,JFK,LAX,12:00,15:30,OO,5521,96,4,2026-08",      # Sat+Sun only, regional operator
     "DL,7,LAX,JFK,23:00,07:10,DL,7,127,9,2026-08",          # red-eye (arrives next day)
+    "DL,1999,ATL,BHM,09:00,08:58,DL,1999,127,9,2026-08",    # westbound short hop: lands 08:58 CT the same day
+    "AS,2001,BOS,SEA,22:30,01:45,AS,2001,127,9,2026-08",    # westbound overnight: next day
     "DL,50,JFK,LAX,07:15,10:40,DL,50,31,6,2026-08",         # two frequencies of one number
     "DL,50,JFK,LAX,18:15,21:40,DL,50,31,6,2026-08",
     "AS,11,SEA,OGG,08:00,10:30,AS,11,127,12,2026-08",
@@ -105,6 +107,13 @@ def test_multiple_frequencies(client):
 def test_red_eye_flags_next_day(client):
     m = client.get("/flights/lookup", params={"flight": "DL7", "date": next_weekday(2)}).json()["matches"][0]
     assert m["arr_next_day"] is True
+
+
+@pytest.mark.parametrize("flight,next_day", [("DL1999", False), ("AS2001", True), ("DL7", True)])
+def test_next_day_is_decided_in_utc(client, flight, next_day):
+    """Clock times alone get ATL 09:00 ET -> BHM 08:58 CT wrong; both zones are used."""
+    m = client.get("/flights/lookup", params={"flight": flight, "date": next_weekday(2)}).json()["matches"][0]
+    assert m["arr_next_day"] is next_day
 
 
 def test_spirit_is_defunct(client):
