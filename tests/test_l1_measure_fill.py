@@ -85,3 +85,69 @@ def test_plan_message_over_12h_early_is_not_this_leg():
     t = [(ts(5), tfms("UAL100", "EWR", "LAX", "2026-11-08T12:00:00Z"))]
     res = m.analyse(date(2026, 11, 8), t, [(ts(23, d=7), sfdps("UAL100", "EWR", "LAX"))], [])
     assert res["carriers"]["UAL"]["legs_with_reg"] == 0
+
+
+def _load_legacy():
+    sp = importlib.util.spec_from_file_location("l1_legacy", Path(__file__).resolve().parent / "l1_measure_fill_legacy.py")
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod
+
+
+def test_streaming_matches_old_list_based_code(tmp_path):
+    """Old code (all messages in lists) and the streaming code give identical JSON on a synthetic multi-file archive set."""
+    import random
+    from datetime import timedelta
+    old = _load_legacy()
+    rnd = random.Random(7)
+    calls = [("UAL", "EWR", "LAX"), ("DAL", "ATL", "JFK"), ("SWA", "DEN", "PHX"), ("HAL", "HNL", "LAX"), ("NKS", "FLL", "ATL"), ("SKW", "ORD", "MSN")]
+    codes = {"EWR": "KEWR", "LAX": "KLAX", "ATL": "KATL", "JFK": "KJFK", "DEN": "KDEN", "PHX": "KPHX", "HNL": "PHNL", "FLL": "KFLL", "ORD": "KORD", "MSN": "KMSN"}
+    files = {"tfms": {}, "sfdps": {}, "stdds": {}}
+
+    def put(src, day, hour, recv, body):
+        files[src].setdefault((day, hour), []).append({"recv": recv.isoformat(), "props": {}, "body": body})
+
+    for n in range(60):
+        pre, dep, arr = calls[n % len(calls)]
+        call = f"{pre}{100 + n % 7}"
+        igtd = datetime(2026, 11, 8, rnd.randrange(0, 24), rnd.choice([0, 15, 30, 45]), tzinfo=timezone.utc) + timedelta(days=rnd.choice([0, 0, 0, 1, -1]))
+        for _ in range(rnd.choice([1, 2])):  # duplicate plans
+            r = igtd - timedelta(hours=rnd.randrange(14, 30))
+            put("tfms", r.date().isoformat(), r.hour, r, tfms(call, dep, codes[arr], igtd.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                                              rnd.choice(["FlightCreate", "FlightScheduleActivate"])))
+        for _ in range(rnd.choice([0, 1, 3])):
+            r = igtd - timedelta(minutes=rnd.randrange(-30, 800))
+            put("sfdps", r.date().isoformat(), r.hour, r, sfdps(call, codes[dep], codes[arr], rnd.choice(["N1", "N2"])))
+        for _ in range(rnd.choice([0, 1, 2])):
+            r = igtd - timedelta(minutes=rnd.randrange(-60, 200))
+            if rnd.random() < 0.5:
+                body = f"<ns2:SurfaceMovementEventMessage><callsign>{call}</callsign><airport>{codes[rnd.choice([dep, arr])]}</airport></ns2:SurfaceMovementEventMessage>"
+            else:
+                body = (f"<ns4:TDLSCSPMessage><airportID>{codes[dep]}</airportID><aircraftID>{call}</aircraftID>"
+                        f"<dataBody>{'/AN N9 ' if rnd.random() < .5 else ''}X</dataBody></ns4:TDLSCSPMessage>")
+            put("stdds", r.date().isoformat(), r.hour, r, body)
+    for src, d in files.items():
+        for (day, hour), recs in d.items():
+            dd = tmp_path / src / day
+            dd.mkdir(parents=True, exist_ok=True)
+            with gzip.open(dd / f"{src}_{hour:02d}.jsonl.gz", "wt") as f:
+                for rec in recs:
+                    f.write(json.dumps(rec) + "\n")
+    day = date(2026, 11, 8)
+    dk = lambda k: day + timedelta(days=k)
+    t = old.read_source(tmp_path, "tfms", [dk(-2), dk(-1), dk(0), dk(1)])
+    s = old.read_source(tmp_path, "sfdps", [dk(-1), dk(0), dk(1)])
+    st = old.read_source(tmp_path, "stdds", [dk(-1), dk(0), dk(1)])
+    start = datetime(2026, 11, 8, tzinfo=timezone.utc)
+    cov = {"tfms": old.coverage_of(t), "sfdps": old.coverage_of(s), "stdds": old.coverage_of(st)}
+    cov["tfms"]["hours_with_data_prev_day"] = old.hours_covered(t, start - timedelta(days=1))
+    cov["sfdps"]["hours_with_data_day"] = old.hours_covered(s, start)
+    cov["stdds"]["hours_with_data_day"] = old.hours_covered(st, start)
+    cov["schedule_universe_complete"] = cov["tfms"]["hours_with_data_prev_day"] == 24
+    cov["complete_day"] = cov["schedule_universe_complete"] and cov["sfdps"]["hours_with_data_day"] == 24 and cov["stdds"]["hours_with_data_day"] == 24
+    expected = old.analyse(day, t, s, st, cov)
+    out = tmp_path / "new.json"
+    assert m.main(["--date", "2026-11-08", "--root", str(tmp_path), "--out", str(out)]) == 0
+    got = json.loads(out.read_text())
+    assert got == json.loads(json.dumps(expected))
+    assert got["legs_domestic"] > 10 and got["all_carriers"]["legs_with_reg"] > 3 and got["all_carriers"]["smes_legs"] > 0
