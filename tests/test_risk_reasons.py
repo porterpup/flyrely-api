@@ -45,3 +45,10 @@ def test_predict_returns_reasons():
                                                      "departure_time": "2026-11-18T19:00:00", "airline": "DL"})
     assert r.status_code == 200
     assert any("Evening flights" in x for x in r.json()["risk_factors"])
+
+
+def test_origin_delay_rate_reason_has_no_percent():
+    import main
+    factors = main.get_risk_factors({"origin_delay_rate": 0.27}, None, None, "ATL", "BOS")
+    assert "Origin airport has a high historical delay rate" in factors
+    assert not any("%" in f for f in factors)

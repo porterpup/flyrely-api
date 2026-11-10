@@ -239,3 +239,34 @@ def test_search_rows_carry_risk_factors(client):
         assert isinstance(f["risk_factors"], list)
     evening = [f for f in body["flights"] if f["dep_time"] == "18:15"][0]
     assert any("Evening flights" in r for r in evening["risk_factors"])
+
+
+NEAR_DUP_ROWS = [
+    "DL,3100,ATL,BHM,08:15,08:10,DL,3100,127,12,2026-08",
+    "DL,3100,ATL,BHM,08:30,08:25,DL,3100,127,40,2026-08",     # 15 min later, seen more often: wins
+    "UA,1227,EWR,SFO,01:20,04:30,UA,1227,127,30,2026-08",
+    "UA,1227,EWR,SFO,01:30,04:40,UA,1227,127,5,2026-08",
+    "DL,50,JFK,LAX,07:15,10:40,DL,50,127,6,2026-08",          # hours apart: both stay
+    "DL,50,JFK,LAX,18:15,21:40,DL,50,127,6,2026-08",
+]
+
+
+def test_near_duplicate_schedule_rows_are_collapsed(tmp_path, monkeypatch):
+    p = tmp_path / "route_schedule.csv.gz"
+    with gzip.open(p, "wt") as f:
+        f.write(HEADER + "\n".join(NEAR_DUP_ROWS) + "\n")
+    monkeypatch.setattr(flight_lookup, "_schedule", BtsTypicalSchedule(p))
+    monkeypatch.setattr(flight_lookup, "_limiter", None)
+    monkeypatch.delenv("FLYRELY_LOOKUP_RATE_PER_MIN", raising=False)
+    c = TestClient(main.app)
+    day = next_weekday(1)
+
+    r = c.get("/flights/lookup", params={"flight": "DL3100", "date": day}).json()
+    assert [m["dep_time"] for m in r["matches"]] == ["08:30"]
+    r = c.get("/flights/lookup", params={"flight": "UA1227", "date": day}).json()
+    assert [m["dep_time"] for m in r["matches"]] == ["01:20"]
+    r = c.get("/flights/lookup", params={"flight": "DL50", "date": day}).json()
+    assert [m["dep_time"] for m in r["matches"]] == ["07:15", "18:15"]
+    r = c.get("/flights/search", params={"origin": "ATL", "dest": "BHM", "date": day})
+    if r.status_code == 200:
+        assert [x["dep_time"] for x in r.json()["flights"]] == ["08:30"]
