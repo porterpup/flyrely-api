@@ -88,6 +88,34 @@ def arrives_next_day(origin: str, dest: str, dep_hhmm: str, arr_hhmm: str, day) 
     return arr_utc <= dep_utc
 
 
+NEAR_DUPLICATE_MINUTES = 20
+
+
+def _minutes(hhmm: str) -> int:
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def dedupe_near_duplicates(legs: list) -> list:
+    """Drop near-duplicate schedule rows: same flight number and route, departures within 20 minutes of each other
+    (the BTS typical schedule carries both when a time shifted during the window). Keeps the row with more days_seen
+    (the earlier one on a tie). The input is already limited to one weekday, so the days overlap by construction.
+    Order of the survivors is unchanged."""
+    keep: dict = {}      # (flight, origin, dest) -> list of kept legs, each the best of its cluster
+    dropped = set()
+    for f in sorted(legs, key=lambda x: (x.dep_time, x.flight_number)):
+        group = keep.setdefault((f.flight_number, f.origin, f.dest), [])
+        near = next((k for k in group if abs(_minutes(k.dep_time) - _minutes(f.dep_time)) <= NEAR_DUPLICATE_MINUTES), None)
+        if near is None:
+            group.append(f)
+        elif f.days_seen > near.days_seen:
+            dropped.add(id(near))
+            group[group.index(near)] = f
+        else:
+            dropped.add(id(f))
+    return [f for f in legs if id(f) not in dropped]
+
+
 def _leg(f, day) -> dict:
     op = f.operating_airline
     return {
@@ -120,10 +148,10 @@ def lookup_flight(request: Request,
     sched = get_schedule()
     notes = []
     searched = code
-    legs = sched.flights_by_number(code, number, day)
+    legs = dedupe_near_duplicates(sched.flights_by_number(code, number, day))
     if not legs and code in RENAMED:
         searched = RENAMED[code]
-        legs = sched.flights_by_number(searched, number, day)
+        legs = dedupe_near_duplicates(sched.flights_by_number(searched, number, day))
         notes.append(f"Hawaiian Airlines now flies under Alaska Airlines (AS) codes, so we looked up AS{number}. "
                      "Flight numbers can differ after the switch; check your booking.")
     if not legs:
@@ -206,7 +234,7 @@ def make_search(score_many, scored_airlines, unavailable, known_airports=None, f
                                "domestic flights only, so check the airport codes."})
 
         sched = get_schedule()
-        legs = sched.flights_on(o, d, day)
+        legs = dedupe_near_duplicates(sched.flights_on(o, d, day))
         if after:
             legs = [f for f in legs if f.dep_time >= after]
         if before:

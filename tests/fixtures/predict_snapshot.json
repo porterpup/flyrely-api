@@ -73,7 +73,7 @@
    "risk_factors": [
     "Evening flights are more often delayed, as delays build up during the day",
     "JFK and LAX are busy airports, where delays spread more easily",
-    "Origin airport has high historical delay rate (26%)"
+    "Origin airport has a high historical delay rate"
    ],
    "risk_level": "medium",
    "warnings": [],

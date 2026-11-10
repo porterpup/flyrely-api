@@ -713,7 +713,7 @@ def get_risk_factors(features: dict, weather_origin: Optional[dict], weather_des
 
     origin_rate = features.get('origin_delay_rate', 0.20)
     if origin_rate > 0.24:
-        factors.append(f"Origin airport has high historical delay rate ({origin_rate*100:.0f}%)")
+        factors.append("Origin airport has a high historical delay rate")
 
     return factors
 
