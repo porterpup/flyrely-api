@@ -154,48 +154,81 @@ class Leg:
         self.smes = self.pdc = self.pdc_reg = False
 
 
-def build_legs(tfms_msgs):
-    legs = {}
-    for _recv, body in tfms_msgs:
+class Accumulator:
+    """Streaming form of the measurement: feed TFMS first (builds the leg table), then SFDPS and STDDS.
+
+    Keeps only compact per-leg facts plus per-source coverage counters, never the message bodies, so memory is
+    bounded by the number of distinct legs. Results equal the old list-based code (every update is
+    order-independent: earliest-recv minimum, boolean flags, distinct sets)."""
+
+    def __init__(self):
+        self.legs = {}
+        self.cov = {s: {"n": 0, "first": None, "last": None, "hours": set()} for s in ("tfms", "sfdps", "stdds")}
+        self.sf_nks, self.st_nks = set(), set()
+        self.by_key = self.by_call = self.key_igtds = None
+        self.sorted_legs = []
+
+    def _note(self, src, recv):
+        c = self.cov[src]
+        c["n"] += 1
+        if c["first"] is None or recv < c["first"]:
+            c["first"] = recv
+        if c["last"] is None or recv > c["last"]:
+            c["last"] = recv
+        c["hours"].add(int(recv.timestamp() // 3600))
+
+    def add_tfms(self, recv, body):
+        self._note("tfms", recv)
         for call, dep, arr, igtd in tfms_legs(body):
-            legs.setdefault((call, dep, arr, igtd), Leg(call, dep, arr, igtd))
-    return sorted(legs.values(), key=lambda l: l.igtd)
+            self.legs.setdefault((call, dep, arr, igtd), Leg(call, dep, arr, igtd))
 
+    def freeze_legs(self):
+        self.sorted_legs = sorted(self.legs.values(), key=lambda l: l.igtd)
+        self.by_key, self.by_call = defaultdict(list), defaultdict(list)
+        for l in self.sorted_legs:
+            self.by_key[(l.call, l.dep, l.arr)].append(l)  # igtd-sorted
+            self.by_call[l.call].append(l)
+        self.key_igtds = {k: [c.igtd for c in v] for k, v in self.by_key.items()}
 
-def assign_registrations(legs, sfdps_msgs):
-    """Set leg.first_reg = earliest recv of an SFDPS reg message assigned to the leg."""
-    by_key = defaultdict(list)
-    for l in legs:
-        by_key[(l.call, l.dep, l.arr)].append(l)  # legs are igtd-sorted already
-    for recv, body in sfdps_msgs:
+    def add_sfdps(self, recv, body):
+        self._note("sfdps", recv)
+        self.sf_nks.update(i for i in sfdps_idents(body) if i.startswith("NKS"))
         for key in sfdps_reg_flights(body):
-            cands = by_key.get(key)
+            cands = self.by_key.get(key)
             if not cands:
                 continue
-            i = bisect_left([c.igtd for c in cands], recv - SF_WINDOW)
+            i = bisect_left(self.key_igtds[key], recv - SF_WINDOW)
             if i < len(cands) and cands[i].igtd - recv <= MAX_LEAD and (cands[i].first_reg is None or recv < cands[i].first_reg):
                 cands[i].first_reg = recv
 
-
-def assign_stdds(legs, stdds_msgs):
-    by_call = defaultdict(list)
-    for l in legs:
-        by_call[l.call].append(l)
-    for recv, body in stdds_msgs:
+    def add_stdds(self, recv, body):
+        self._note("stdds", recv)
         ev = stdds_event(body)
         if not ev:
-            continue
+            return
         kind, call, airport = ev[:3]
-        cands = [l for l in by_call.get(call, ()) if (l.dep == airport if kind == "pdc" else airport in (l.dep, l.arr))
+        if call.startswith("NKS"):
+            self.st_nks.add(call)
+        cands = [l for l in self.by_call.get(call, ()) if (l.dep == airport if kind == "pdc" else airport in (l.dep, l.arr))
                  and abs(l.igtd - recv) <= STDDS_WINDOW]
         if not cands:
-            continue
+            return
         l = min(cands, key=lambda c: abs(c.igtd - recv))
         if kind == "smes":
             l.smes = True
         else:
             l.pdc = True
             l.pdc_reg = l.pdc_reg or ev[3]
+
+    def coverage(self, src, day_start=None):
+        c = self.cov[src]
+        out = {"messages": c["n"], "first_recv": c["first"].isoformat() if c["first"] else None,
+               "last_recv": c["last"].isoformat() if c["last"] else None}
+        return out
+
+    def hours_covered(self, src, day_start):
+        h0 = int(day_start.timestamp() // 3600)
+        return len({h - h0 for h in self.cov[src]["hours"] if 0 <= h - h0 < 24})
 
 
 def pct(sorted_vals, p):
@@ -229,12 +262,22 @@ def summarise(legs):
 
 
 def analyse(day, tfms_msgs, sfdps_msgs, stdds_msgs, coverage=None):
-    """The three message lists are lists of (recv datetime, body). Returns the JSON-able result."""
+    """Convenience wrapper over iterables of (recv datetime, body); the CLI streams via Accumulator directly."""
+    acc = Accumulator()
+    for r, b in tfms_msgs:
+        acc.add_tfms(r, b)
+    acc.freeze_legs()
+    for r, b in sfdps_msgs:
+        acc.add_sfdps(r, b)
+    for r, b in stdds_msgs:
+        acc.add_stdds(r, b)
+    return finalise(day, acc, coverage)
+
+
+def finalise(day, acc, coverage=None):
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
-    all_legs = build_legs(tfms_msgs)
-    assign_registrations(all_legs, sfdps_msgs)
-    assign_stdds(all_legs, stdds_msgs)
+    all_legs = acc.sorted_legs
     legs = [l for l in all_legs if start <= l.igtd < end]
     domestic = [l for l in legs if is_us(l.dep) and is_us(l.arr)]
     by_carrier = defaultdict(list)
@@ -245,8 +288,7 @@ def analyse(day, tfms_msgs, sfdps_msgs, stdds_msgs, coverage=None):
         carriers[icao] = {"label": label, **summarise(by_carrier.get(icao, []))}
     regionals = {r: summarise(by_carrier[r]) for r in REGIONALS if r in by_carrier}
     other = [l for k, v in by_carrier.items() if k not in CARRIERS and k not in REGIONALS for l in v]
-    sf_nks = len({i for _r, b in sfdps_msgs for i in sfdps_idents(b) if i.startswith("NKS")})
-    st_nks = len({ev[1] for _r, b in stdds_msgs for ev in [stdds_event(b)] if ev and ev[1].startswith("NKS")})
+    sf_nks, st_nks = len(acc.sf_nks), len(acc.st_nks)
     return {
         "date": day.isoformat(), "coverage": coverage or {},
         "legs_total_in_day": len(legs), "legs_domestic": len(domestic),
@@ -263,10 +305,9 @@ def analyse(day, tfms_msgs, sfdps_msgs, stdds_msgs, coverage=None):
 
 
 # ------------------------------------------------------------------ archive reading
-def read_source(root, src, days):
-    """[(recv, body)] from <root>/<src>/<day>/ for the given days (read-only)."""
+def iter_source(root, src, days):
+    """Yield (recv, body) from <root>/<src>/<day>/ for the given days, one archive file at a time (read-only)."""
     names = {d.isoformat() for d in days}
-    out = []
     for f in archive.archive_files(Path(root) / src):
         if f.parent.name not in names:
             continue
@@ -277,20 +318,7 @@ def read_source(root, src, days):
                 continue
             body, recv = rec.get("body"), parse_ts(rec.get("recv", ""))
             if body and recv:
-                out.append((recv, body))
-    return out
-
-
-def coverage_of(msgs):
-    if not msgs:
-        return {"messages": 0, "first_recv": None, "last_recv": None}
-    return {"messages": len(msgs), "first_recv": min(r for r, _ in msgs).isoformat(),
-            "last_recv": max(r for r, _ in msgs).isoformat()}
-
-
-def hours_covered(msgs, day_start):
-    """How many of the 24 UTC hours from day_start have at least one archived message."""
-    return len({int((r - day_start).total_seconds() // 3600) for r, _ in msgs if 0 <= (r - day_start).total_seconds() < 86400})
+                yield recv, body
 
 
 def main(argv=None):
@@ -301,20 +329,25 @@ def main(argv=None):
     args = ap.parse_args(argv)
     day = date.fromisoformat(args.date)
     d = lambda k: day + timedelta(days=k)
-    tfms = read_source(args.root, "tfms", [d(-2), d(-1), d(0), d(1)])  # schedule messages arrive about a day ahead
-    sfdps = read_source(args.root, "sfdps", [d(-1), d(0), d(1)])
-    stdds = read_source(args.root, "stdds", [d(-1), d(0), d(1)])
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
-    cov = {"tfms": coverage_of(tfms), "sfdps": coverage_of(sfdps), "stdds": coverage_of(stdds)}
+    acc = Accumulator()
+    for r, b in iter_source(args.root, "tfms", [d(-2), d(-1), d(0), d(1)]):  # schedule messages arrive about a day ahead
+        acc.add_tfms(r, b)
+    acc.freeze_legs()
+    for r, b in iter_source(args.root, "sfdps", [d(-1), d(0), d(1)]):
+        acc.add_sfdps(r, b)
+    for r, b in iter_source(args.root, "stdds", [d(-1), d(0), d(1)]):
+        acc.add_stdds(r, b)
+    cov = {s: acc.coverage(s) for s in ("tfms", "sfdps", "stdds")}
     # Legs are activated about 24 h before their igtd, so the schedule universe of day D is complete only if
     # TFMS has messages in every hour of D-1. SFDPS and STDDS must have messages in every hour of D.
-    cov["tfms"]["hours_with_data_prev_day"] = hours_covered(tfms, start - timedelta(days=1))
-    cov["sfdps"]["hours_with_data_day"] = hours_covered(sfdps, start)
-    cov["stdds"]["hours_with_data_day"] = hours_covered(stdds, start)
+    cov["tfms"]["hours_with_data_prev_day"] = acc.hours_covered("tfms", start - timedelta(days=1))
+    cov["sfdps"]["hours_with_data_day"] = acc.hours_covered("sfdps", start)
+    cov["stdds"]["hours_with_data_day"] = acc.hours_covered("stdds", start)
     cov["schedule_universe_complete"] = cov["tfms"]["hours_with_data_prev_day"] == 24
     cov["complete_day"] = (cov["schedule_universe_complete"] and cov["sfdps"]["hours_with_data_day"] == 24
                            and cov["stdds"]["hours_with_data_day"] == 24)
-    res = analyse(day, tfms, sfdps, stdds, cov)
+    res = finalise(day, acc, cov)
     out = args.out or ROOT / "backtest" / "results" / f"l1_fill_{args.date}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=2) + "\n")
