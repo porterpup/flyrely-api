@@ -34,7 +34,9 @@
          certificate" until a restart. The folder is now data/swim/trust/ and is rebuilt if empty. -->
     <key>KeepAlive</key>
     <true/>
-    <!-- at most one (re)start per minute, so a crash loop cannot hammer SWIM -->
+    <!-- at most one (re)start per minute. This alone does not stop a restart loop: the consumer itself
+         rate-limits its TLS fast-exit (once per 30 min), and swim.health alerts on tls_error/restarting
+         states, on 3+ restarts per hour, and on silence (which is carried across restarts). -->
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>ExitTimeOut</key>

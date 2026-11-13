@@ -94,12 +94,88 @@ def test_bad_env_values_fall_back(loop_env, monkeypatch, tmp_path):
 
 def test_hostname_mismatch_is_a_config_error_not_a_retry_loop(loop_env, monkeypatch, tmp_path):
     built = []
-    monkeypatch.setattr(consumer, "build_service",
-                        lambda: built.append(1) or FakeService("SOLCLIENT_SUBCODE_UNTRUSTED_COMMON_NAME"))
+    real_msg = ("sub_code 'SOLCLIENT_SUBCODE_UNTRUSTED_CERTIFICATE' ... Certificate verification failed, "
+                "rc='hostname mismatch'")
+    monkeypatch.setattr(consumer, "build_service", lambda: built.append(1) or FakeService(real_msg))
     rc = consumer.main(["--source", "tfms", "--out", str(tmp_path / "out"),
                         "--status-dir", str(tmp_path / "status"), "--exit-on-park"])
     assert rc == 2 and built == [1] and loop_env == []
     assert status(tmp_path)["state"] == "config_error"
+
+
+RESET_MSG = ("sub_code 'SOLCLIENT_SUBCODE_COMMUNICATION_ERROR' ... \"SSL 'SSL-client' cannot read, sslErr = 5: "
+             "'Connection reset by peer (54)\"")
+
+
+def test_connection_reset_is_transient_not_tls(loop_env, monkeypatch, tmp_path):
+    assert not consumer.is_tls_error(RESET_MSG)
+    states = []
+    real = monitor.Stats.set_state
+    monkeypatch.setattr(monitor.Stats, "set_state", lambda self, st, err=None: (states.append(st), real(self, st, err)))
+    monkeypatch.setattr(consumer, "build_service", lambda: FakeService(RESET_MSG))
+    monkeypatch.setenv("SWIM_MAX_CONSECUTIVE_FAILURES", "5")
+    assert run_main(tmp_path) == consumer.EXIT_RESTART  # via the 5-failure path, not the 2-TLS-error path
+    assert loop_env == [5, 10, 20, 40]  # normal growing backoff
+    assert "tls_error" not in states and status(tmp_path)["tls_reason"] is None
+
+
+def test_tls_fast_exit_recorded_then_suppressed_within_30_min(loop_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(consumer, "build_service", lambda: FakeService(CERT_MSG))
+    assert run_main(tmp_path) == consumer.EXIT_RESTART and loop_env == [5]
+    first = status(tmp_path)["last_tls_exit_epoch"]
+    assert first is not None
+    loop_env.clear()
+    # "launchd restart" soon after: the same TLS error must not fast-exit again
+    monkeypatch.setenv("SWIM_MAX_CONSECUTIVE_FAILURES", "5")
+    assert run_main(tmp_path) == consumer.EXIT_RESTART
+    assert loop_env == [5, 10, 20, 40]  # normal backoff and the 5-failure path
+    assert status(tmp_path)["last_tls_exit_epoch"] == first
+
+
+def test_tls_fast_exit_allowed_again_after_cooldown(loop_env, monkeypatch, tmp_path):
+    import time as _t
+    monitor.write_json_atomic(tmp_path / "status" / "tfms.json",
+                              {"last_tls_exit_epoch": _t.time() - consumer.TLS_EXIT_COOLDOWN_S - 5})
+    monkeypatch.setattr(consumer, "build_service", lambda: FakeService(CERT_MSG))
+    assert run_main(tmp_path) == consumer.EXIT_RESTART and loop_env == [5]
+
+
+def test_silence_detected_across_restart(tmp_path):
+    t_last = 1_000_000.0
+    monitor.write_json_atomic(tmp_path / "tfms.json", {
+        "last_message_epoch": t_last, "started_epoch": t_last - 100, "updated_epoch": t_last + 60,
+        "state": "reconnecting", "restart_epochs_24h": []})
+    now = t_last + 3600
+    st = monitor.Stats("tfms", tmp_path, clock=lambda: now)  # a new process: started_epoch == now
+    st.carry_forward()
+    probs = health.check(tmp_path, ["tfms"], tmp_path, now=now + 30, max_silence_min=10)
+    assert "tfms:silence" in probs
+    assert json.loads((tmp_path / "tfms.json").read_text())["restart_epochs_24h"] == [round(now)]
+
+
+def test_health_alerts_on_tls_state_and_restart_rate(tmp_path):
+    now = 5_000_000.0
+    monitor.write_json_atomic(tmp_path / "tfms.json", {
+        "state": "restarting", "tls_reason": "X", "updated_epoch": now, "started_epoch": now,
+        "last_message_epoch": now, "restart_epochs_24h": [now - 60, now - 600, now - 1200]})
+    probs = health.check(tmp_path, ["tfms"], tmp_path, now=now)
+    assert "tfms:tls" in probs and "tfms:restarts" in probs
+
+
+def test_trust_store_refreshed_once_per_process_start(monkeypatch, tmp_path):
+    monkeypatch.delenv("SCDS_TRUST_STORE_DIR", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(consumer, "TRUST_ROOT", tmp_path / "trust")
+    monkeypatch.setattr(consumer, "SOURCE", "tfms")
+    monkeypatch.setattr(consumer, "_TRUST_REFRESHED", set())
+    d = consumer.trust_store_dir()
+    (tmp_path / "trust" / "tfms" / "stale.pem").write_text("x")
+    assert consumer.trust_store_dir() == d and (tmp_path / "trust" / "tfms" / "stale.pem").exists()  # no rebuild
+    monkeypatch.setattr(consumer, "_TRUST_REFRESHED", set())  # "new process"
+    consumer.trust_store_dir()
+    assert not (tmp_path / "trust" / "tfms" / "stale.pem").exists()  # repaired
+    assert list((tmp_path / "trust" / "tfms").glob("*.pem"))
+    assert [p.name for p in (tmp_path / "trust").iterdir()] == ["tfms"]  # no temp siblings left
 
 
 def test_backoff_caps_at_ten_minutes():

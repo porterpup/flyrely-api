@@ -65,6 +65,23 @@ class Stats:
         self.tls_reason = None  # sub-code name of the last TLS failure; cleared on connect
         self.consecutive_failures = 0
         self.backoff_s = 0
+        self.first_started = self.started  # carried across restarts: when this silence began at the latest
+        self.restarts = []  # epochs this process (re)started, carried across restarts, last 24 h
+        self.last_tls_exit = None  # epoch of the last TLS fast-exit (restart cool-down)
+
+    def carry_forward(self, now=None):
+        """Load what must survive a restart from the previous status file: last_message, restart history,
+        last TLS exit. Without this each new process resets the silence clock and health never fires."""
+        now = now or self.clock()
+        try:
+            prev = json.loads(status_path(self.status_dir, self.source).read_text())
+        except (OSError, ValueError):
+            return
+        self.last_message = prev.get("last_message_epoch")
+        self.first_started = prev.get("first_started_epoch") or prev.get("started_epoch") or self.started
+        self.last_tls_exit = prev.get("last_tls_exit_epoch")
+        self.restarts = [t for t in prev.get("restart_epochs_24h", []) if now - t <= RECONNECT_HISTORY_S] + [round(now)]
+        self.write(force=True)
 
     def message(self, kept: bool, reason: str = ""):
         now = self.clock()
@@ -115,6 +132,8 @@ class Stats:
             "decisions": dict(self.reasons.most_common(25)), "last_error": self.last_error,
             "tls_reason": self.tls_reason, "consecutive_failures": self.consecutive_failures,
             "backoff_s": self.backoff_s,
+            "first_started_epoch": self.first_started, "restart_epochs_24h": self.restarts,
+            "last_tls_exit_epoch": self.last_tls_exit,
         }
 
     def write(self, force=False):

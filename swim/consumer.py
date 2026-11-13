@@ -27,6 +27,7 @@ import logging
 import logging.handlers
 import os
 import re
+import shutil
 import signal
 import socket
 import sys
@@ -46,8 +47,12 @@ SOURCE = "tfms"  # set by main()
 FIELDS = ("URL", "USER", "PASSWORD", "QUEUE", "VPN")
 AUTH_RE = re.compile(r"login[_ ]failure|authentication|unauthori[sz]ed|not authori[sz]ed|"
                      r"authori[sz]ation failed|invalid (user|client) ?name", re.I)
-TLS_RE = re.compile(r"CERTIFICATE|SSL|TLS|handshake", re.I)
-HOSTNAME_RE = re.compile(r"COMMON_?NAME", re.I)  # wrong host / name mismatch: a configuration error, not transient
+# TLS is classified by Solace SUB-CODE only, never by words like SSL/TLS: tcps connections report ordinary resets as
+# "SSL 'SSL-client' cannot read ... Connection reset by peer" under SOLCLIENT_SUBCODE_COMMUNICATION_ERROR (transient).
+TLS_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]*(CERT|COMMON_?NAME)[A-Z0-9_]*")
+# The library reports a wrong host as UNTRUSTED_CERTIFICATE with rc='hostname mismatch' / 'IP address mismatch'.
+HOSTNAME_RE = re.compile(r"rc='(hostname|IP address) mismatch'", re.I)  # config error: park, don't loop
+TLS_EXIT_COOLDOWN_S = 30 * 60  # a 2nd TLS fast-exit within this long of the previous one is suppressed
 SUBCODE_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]+")
 BACKOFF_BASE_S = 5.0
 BACKOFF_CAP_S = 600.0  # 10 min
@@ -244,13 +249,28 @@ TRUST_ROOT = DATA_ROOT / "trust"  # persistent (data/ is gitignored); NOT $TMPDI
 LINUX_CERT_DIR = Path("/etc/ssl/certs")
 
 
+_TRUST_REFRESHED = set()  # trust dirs already rebuilt by this process
+
+
 def _build_trust_dir(out: Path):
+    """(Re)build out/ from certifi: write a temp sibling, then swap it in, so a reader never sees a half-written
+    folder and a certifi upgrade or an interrupted earlier build is repaired."""
     import certifi
-    out.mkdir(parents=True, exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f"{out.name}.tmp{os.getpid()}")
+    old = out.with_name(f"{out.name}.old{os.getpid()}")
+    for d in (tmp, old):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+    tmp.mkdir()
     pems = re.findall(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
                       Path(certifi.where()).read_text(), re.S)
     for i, pem in enumerate(pems):
-        (out / f"ca{i:03d}.pem").write_text(pem + "\n")
+        (tmp / f"ca{i:03d}.pem").write_text(pem + "\n")
+    if out.exists():
+        os.rename(out, old)
+    os.rename(tmp, out)
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def _clean_stale_tmp_trust_dirs():
@@ -269,15 +289,16 @@ def trust_store_dir() -> str:
     1. SCDS_TRUST_STORE_DIR if set.
     2. Linux: the system directory /etc/ssl/certs (needs the ca-certificates package).
     3. Otherwise (macOS, python.org Python has no PEM directory of its own): certifi's CA bundle split into
-       data/swim/trust/<source>/ (persistent), rebuilt when missing or empty."""
+       data/swim/trust/<source>/ (persistent), rebuilt once per process start and whenever missing or empty."""
     d = os.environ.get("SCDS_TRUST_STORE_DIR")
     if d:
         return d
     if sys.platform.startswith("linux") and LINUX_CERT_DIR.is_dir() and any(LINUX_CERT_DIR.iterdir()):
         return str(LINUX_CERT_DIR)
     out = TRUST_ROOT / SOURCE
-    if not (out.is_dir() and any(out.glob("*.pem"))):
-        log.info("trust store missing or empty: rebuilding")
+    if str(out) not in _TRUST_REFRESHED or not (out.is_dir() and any(out.glob("*.pem"))):
+        log.info("trust store: rebuilding (once per process start, or missing/empty)")
+        _TRUST_REFRESHED.add(str(out))
         _build_trust_dir(out)
         _clean_stale_tmp_trust_dirs()
     return str(out)
@@ -373,7 +394,7 @@ def consume(writer, flt, stats, deadline) -> int:
             if is_auth_error(msg):
                 raise AuthError("authentication failed (check the SCDS user / password / VPN settings)") from None
             if HOSTNAME_RE.search(msg):
-                raise ConfigError("TLS hostname / common-name mismatch (check the SCDS URL)") from None
+                raise ConfigError("TLS hostname / IP mismatch (check the SCDS URL)") from None
             if is_tls_error(msg):
                 raise TlsError(tls_reason(msg)) from None
             raise
@@ -548,6 +569,7 @@ def main(argv=None) -> int:
     load_dotenv(ENV_PATH)
     load_dotenv(ENV_PATH.with_name(ENV_PATH.name + ".alerts"))  # optional FLYRELY_ALERT_* settings
     stats = monitor.Stats(SOURCE, status_dir)
+    stats.carry_forward()  # last message time, restart history and last TLS fast-exit survive process restarts
 
     def config_error(msg):
         log.error("%s", msg)
@@ -636,7 +658,12 @@ def main(argv=None) -> int:
                     log.warning("transient error (%s): attempt %d failed, reconnecting in %.0fs", err, backoff.failures, delay)
                 stats.set_state("tls_error" if tls else "reconnecting", err)
                 if tls_streak >= TLS_FAILURES_BEFORE_RESTART:
-                    return give_up(f"{tls_streak} consecutive TLS errors ({e.reason})")
+                    prev = stats.last_tls_exit
+                    if prev is None or time.time() - prev >= TLS_EXIT_COOLDOWN_S:
+                        stats.last_tls_exit = time.time()
+                        return give_up(f"{tls_streak} consecutive TLS errors ({e.reason})")
+                    log.warning("tls fast-exit suppressed: already restarted for TLS %.0f min ago; "
+                                "using normal backoff", (time.time() - prev) / 60)
                 if backoff.failures >= max_failures:
                     return give_up(f"{backoff.failures} consecutive connection failures")
                 sleep_interruptible(delay, stats)
