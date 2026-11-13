@@ -261,7 +261,23 @@ def summarise(legs):
     }
 
 
-def analyse(day, tfms_msgs, sfdps_msgs, stdds_msgs, coverage=None):
+def fill_row(legs):
+    n, k = len(legs), sum(1 for l in legs if l.first_reg)
+    return {"scheduled_legs": n, "legs_with_reg": k, "fill": share(k, n)}
+
+
+def breakdown(domestic, min_origin_legs=50):
+    """Aggregates only: fill by scheduled departure hour (UTC) and by origin airport with >= min_origin_legs legs."""
+    by_hour, by_origin = defaultdict(list), defaultdict(list)
+    for l in domestic:
+        by_hour[l.igtd.hour].append(l)
+        by_origin[l.dep].append(l)
+    return {"by_departure_hour_utc": {f"{h:02d}": fill_row(by_hour[h]) for h in sorted(by_hour)},
+            "by_origin_airport": {a: fill_row(v) for a, v in sorted(by_origin.items()) if len(v) >= min_origin_legs},
+            "min_origin_legs": min_origin_legs}
+
+
+def analyse(day, tfms_msgs, sfdps_msgs, stdds_msgs, coverage=None, with_breakdown=False):
     """Convenience wrapper over iterables of (recv datetime, body); the CLI streams via Accumulator directly."""
     acc = Accumulator()
     for r, b in tfms_msgs:
@@ -271,10 +287,10 @@ def analyse(day, tfms_msgs, sfdps_msgs, stdds_msgs, coverage=None):
         acc.add_sfdps(r, b)
     for r, b in stdds_msgs:
         acc.add_stdds(r, b)
-    return finalise(day, acc, coverage)
+    return finalise(day, acc, coverage, with_breakdown)
 
 
-def finalise(day, acc, coverage=None):
+def finalise(day, acc, coverage=None, with_breakdown=False):
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
     all_legs = acc.sorted_legs
@@ -289,7 +305,7 @@ def finalise(day, acc, coverage=None):
     regionals = {r: summarise(by_carrier[r]) for r in REGIONALS if r in by_carrier}
     other = [l for k, v in by_carrier.items() if k not in CARRIERS and k not in REGIONALS for l in v]
     sf_nks, st_nks = len(acc.sf_nks), len(acc.st_nks)
-    return {
+    res = {
         "date": day.isoformat(), "coverage": coverage or {},
         "legs_total_in_day": len(legs), "legs_domestic": len(domestic),
         "carriers": carriers, "regionals": regionals,
@@ -302,6 +318,9 @@ def finalise(day, acc, coverage=None):
         "hal": {"status": "Hawaiian now operates under Alaska codes; HAL callsigns are counted in ASA",
                 "tfms_legs_hal_callsign_merged_into_asa": sum(1 for l in legs if l.call.startswith("HAL"))},
     }
+    if with_breakdown:
+        res["breakdown"] = breakdown(domestic)
+    return res
 
 
 # ------------------------------------------------------------------ archive reading
@@ -326,6 +345,8 @@ def main(argv=None):
     ap.add_argument("--date", required=True, help="UTC day to measure, YYYY-MM-DD")
     ap.add_argument("--root", type=Path, default=ROOT / "data" / "swim")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--breakdown", action="store_true",
+                    help="add aggregate fill by scheduled departure hour (UTC) and by origin airport (>=50 legs)")
     args = ap.parse_args(argv)
     day = date.fromisoformat(args.date)
     d = lambda k: day + timedelta(days=k)
@@ -347,7 +368,7 @@ def main(argv=None):
     cov["schedule_universe_complete"] = cov["tfms"]["hours_with_data_prev_day"] == 24
     cov["complete_day"] = (cov["schedule_universe_complete"] and cov["sfdps"]["hours_with_data_day"] == 24
                            and cov["stdds"]["hours_with_data_day"] == 24)
-    res = finalise(day, acc, cov)
+    res = finalise(day, acc, cov, args.breakdown)
     out = args.out or ROOT / "backtest" / "results" / f"l1_fill_{args.date}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=2) + "\n")
