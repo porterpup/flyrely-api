@@ -132,6 +132,27 @@ Small n, rough.
 
 These are upper-bound-style estimates. Prior links are often wrong, and A7's L_p arms modelled only missing links, not wrong ones. The A7 roadmap guess of "29% SFDPS fill" understates full-day fill and overstates T-3h availability.
 
+### 1.5 Measured, full day (2026-11-09, 11-11, 11-12)
+
+Values are read from `backtest/results/l1_fill_2026-11-09.json`, `l1_fill_2026-11-11.json` and `l1_fill_2026-11-12.json`, rounded to 2 decimals. Legs are scheduled legs per day. Column names follow the JSON keys.
+
+| Carrier | 11-09 legs | 11-09 fill | 11-09 kn60 | 11-09 kn180 | 11-09 pdc+reg | 11-09 smes | 11-11 legs | 11-11 fill | 11-11 kn60 | 11-11 kn180 | 11-11 pdc+reg | 11-11 smes | 11-12 legs | 11-12 fill | 11-12 kn60 | 11-12 kn180 | 11-12 pdc+reg | 11-12 smes |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| AAL | 1889 | 0.94 | 0.49 | 0.00 | 0.33 | 0.97 | 1441 | 0.96 | 0.58 | 0.00 | 0.32 | 0.97 | 1681 | 0.91 | 0.47 | 0.00 | 0.30 | 0.95 |
+| DAL | 2537 | 0.94 | 0.01 | 0.00 | 0.54 | 0.96 | 2391 | 0.95 | 0.01 | 0.00 | 0.53 | 0.96 | 2460 | 0.90 | 0.01 | 0.00 | 0.51 | 0.93 |
+| UAL | 2118 | 0.91 | 0.01 | 0.00 | 0.50 | 0.94 | 2048 | 0.92 | 0.01 | 0.00 | 0.50 | 0.94 | 2105 | 0.88 | 0.01 | 0.01 | 0.46 | 0.92 |
+| SWA | 4186 | 0.94 | 0.46 | 0.02 | 0.65 | 0.78 | 3613 | 0.94 | 0.47 | 0.02 | 0.62 | 0.77 | 3804 | 0.92 | 0.46 | 0.03 | 0.58 | 0.75 |
+| JBU | 549 | 0.96 | 0.57 | 0.06 | 0.65 | 0.95 | 457 | 0.97 | 0.58 | 0.09 | 0.65 | 0.93 | 466 | 0.86 | 0.52 | 0.05 | 0.61 | 0.86 |
+| ASA | 676 | 0.61 | 0.21 | 0.00 | 0.44 | 0.92 | 570 | 0.58 | 0.19 | 0.00 | 0.37 | 0.90 | 650 | 0.58 | 0.16 | 0.00 | 0.39 | 0.89 |
+| FFT | 423 | 0.97 | 0.00 | 0.00 | 0.00 | 0.99 | 316 | 0.96 | 0.00 | 0.00 | 0.00 | 0.98 | 339 | 0.92 | 0.00 | 0.00 | 0.00 | 0.94 |
+| AAY | 261 | 0.87 | 0.02 | 0.00 | 0.00 | 0.36 | 66 | 0.83 | 0.02 | 0.00 | 0.00 | 0.30 | 223 | 0.88 | 0.00 | 0.00 | 0.00 | 0.33 |
+| regionals_all | 5951 | 0.93 | 0.28 | 0.00 | 0.00 | 0.93 | 5802 | 0.92 | 0.27 | 0.00 | 0.00 | 0.92 | 5867 | 0.87 | 0.24 | 0.00 | 0.00 | 0.87 |
+
+- **Alaska fill.** Alaska (ASA, including Hawaiian) fill is only about 0.58–0.61 on all three days.
+- **Registration lead times cluster at fixed values.** DL and UA plans appear at most about 45–49 min before departure, and AA at about 74 min. This is a filing-system ceiling, so M1 (own plan) cannot get earlier. Forward chaining (S3, `linkage/PROTOCOL_CHAIN.md`) is the route to T-3h.
+- **The 11-12 dip.** Overall domestic fill fell from 0.92 (11-09 and 11-11) to 0.88 (11-12). The loss is concentrated in UTC hours 16–23 and in the Northeast: JFK 0.96→0.73, EWR 0.97→0.75, LGA 0.96→0.77, PHL 0.95→0.79. Carriers RPA, EDV, JBU and PDT were most affected. The median change across airports was only −3.5 points. The 2026-11-13 SWIM outage (09:49–21:50 UTC) does not explain it, because 11-12 legs need data only until about 11-13 01:00 UTC. The likely cause is an operational or upstream effect in the NYC/PHL area that evening (unconfirmed). Measured with `scripts/l1_measure_fill.py --breakdown` (PR #63).
+- **Exclude 2026-11-13** from linkage evaluation because of the outage.
+
 ---
 
 ## 2. Design
