@@ -96,6 +96,7 @@ def agreement_with_bts(joined: pd.DataFrame, outcome_rows: pd.DataFrame) -> dict
                       "self_late": {"bts_on_time": 0, "bts_late": 0}}}
     if joined.empty or outcome_rows.empty:
         return out
+    # The latest de-duplicated prediction is used only to locate the BTS outcome row for this flight.
     one = joined.sort_values("ts_utc").drop_duplicates("rid", keep="last")
     m = outcomes.match_predictions(one.drop(columns=["label"]), outcome_rows)
     m = m.merge(one[["rid", "label"]], on="rid")
@@ -176,6 +177,8 @@ def to_markdown(report: dict) -> str:
         for g in report["by_model_lead_time"]:
             L.append(f"| {g['model_version']} | {g['lead_time']} | {g['n']} | {f(g['brier'])} | {f(g['log_loss'])} | "
                      f"{f(g['auc'])} | {f(g['ece'])} | {f(g['base_rate'], 3)} | {f(g['mean_predicted'], 3)} |")
+        L += ["", "Note: one report can count in several lead-time buckets (and models), so the n values across rows "
+                  "are not independent and must not be added together."]
     else:
         L.append("No scored reports yet.")
     a = report["agreement_with_bts"]
