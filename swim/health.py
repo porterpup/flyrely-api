@@ -58,7 +58,8 @@ def check(status_dir: Path, sources, root: Path, now: float, max_silence_min=10.
         ref = st.get("last_message_epoch") or st.get("started_epoch") or upd
         if now - ref > max_silence_min * 60:
             problems[f"{src}:silence"] = (f"{src}: no messages for {(now - ref) / 60:.0f} min "
-                                          f"(state={st.get('state')}, reconnects={st.get('reconnect_count')}).")
+                                          f"(state={st.get('state')}, reconnects={st.get('reconnect_count')}"
+                                          + (f", tls_reason={st['tls_reason']}" if st.get("tls_reason") else "") + ").")
         recent = [t for t in st.get("reconnect_epochs_24h", []) if now - t <= reconnect_window_min * 60]
         if len(recent) >= reconnects:
             problems[f"{src}:reconnects"] = (f"{src}: {len(recent)} reconnects in the last "

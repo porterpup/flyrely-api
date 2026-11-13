@@ -5,7 +5,8 @@ Binds to the persistent Solace queue, filters each message at receive time
 process run per hour (swim/archive.py, zstd or gzip), fsyncs, and only then
 acknowledges the whole batch (dropped messages are acknowledged too).
 Writes a heartbeat file (swim/monitor.py). Exit codes: 0 clean, 2 config error,
-3 authentication failure. On a config error or auth failure the service parks IN-PROCESS (status
+3 authentication failure, 4 safety-net exit (too many consecutive failures or open file descriptors: launchd
+KeepAlive restarts a clean process). On a config error or auth failure the service parks IN-PROCESS (status
 `config_error` / `parked`, no connection attempts, waits until SIGTERM); an auth park resumes by itself after
 `python -m swim.health --unpark <source>`. --exit-on-park exits with 2/3 instead (manual runs).
 
@@ -47,6 +48,12 @@ SOURCE = "tfms"  # set by main()
 FIELDS = ("URL", "USER", "PASSWORD", "QUEUE", "VPN")
 AUTH_RE = re.compile(r"login[_ ]failure|authentication|unauthori[sz]ed|not authori[sz]ed|"
                      r"authori[sz]ation failed|invalid (user|client) ?name", re.I)
+TLS_RE = re.compile(r"UNTRUSTED_CERTIFICATE|UNTRUSTED_COMMON_NAME|CERTIFICATE|COMMON_NAME|SSL|TLS|handshake", re.I)
+SUBCODE_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]+")
+BACKOFF_BASE_S = 5.0
+BACKOFF_CAP_S = 600.0  # 10 min
+MAX_CONSECUTIVE_FAILURES = int(os.environ.get("SWIM_MAX_CONSECUTIVE_FAILURES", "30"))
+EXIT_RESTART = 4
 BATCH_MAX = 100
 BATCH_SECONDS = 1.0
 RUN_ID = f"{datetime.now(timezone.utc):%H%M%S}p{os.getpid()}"  # one file per process run
@@ -61,6 +68,55 @@ class AuthError(Exception):
 
 class ConfigError(Exception):
     pass
+
+
+class TlsError(Exception):
+    """Certificate / TLS handshake failure on connect. Transient (it fixed itself on 2026-11-13): retried with backoff."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class Backoff:
+    """Exponential delay for consecutive failures, capped; reset() after a successful connect."""
+
+    def __init__(self, base=BACKOFF_BASE_S, cap=BACKOFF_CAP_S):
+        self.base, self.cap, self.failures = base, cap, 0
+
+    def next(self) -> float:
+        delay = min(self.base * 2 ** self.failures, self.cap)
+        self.failures += 1
+        return delay
+
+    def reset(self):
+        self.failures = 0
+
+
+def open_fds() -> int:
+    """Open file descriptors of this process (-1 if unknown)."""
+    for d in ("/dev/fd", "/proc/self/fd"):
+        try:
+            return len(os.listdir(d))
+        except OSError:
+            continue
+    return -1
+
+
+def max_open_fds() -> int:
+    """Safety-net threshold: SWIM_MAX_OPEN_FDS, else half the soft RLIMIT_NOFILE (default 500 if unknown)."""
+    try:
+        return int(os.environ["SWIM_MAX_OPEN_FDS"])
+    except (KeyError, ValueError):
+        pass
+    try:
+        import resource
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        if soft > 0:
+            return max(int(soft * 0.5), 50)
+    except (ImportError, OSError, ValueError):
+        pass
+    return 500
 
 
 def secret_keys(sources=SOURCES):
@@ -165,6 +221,16 @@ def is_auth_error(message: str) -> bool:
     return bool(AUTH_RE.search(message))
 
 
+def is_tls_error(message: str) -> bool:
+    return bool(TLS_RE.search(message))
+
+
+def tls_reason(message: str) -> str:
+    """Short, secret-free reason: the Solace sub-code name if present, else a generic label."""
+    m = SUBCODE_RE.search(message)
+    return m.group(0) if m else "TLS_ERROR"
+
+
 _TRUST_DIR = None
 
 
@@ -250,24 +316,43 @@ def _flush(receiver, writer, pending) -> int:
     return len(pending)
 
 
-def consume(writer, flt, stats, deadline) -> int:
-    from solace.messaging.resources.queue import Queue
-    from solace.messaging.errors.pubsubplus_client_error import PubSubPlusClientError
+def _release(service, receiver):
+    """Free everything one attempt created (receiver, then the messaging service and its Solace context).
+    Runs in a finally on every attempt: a leaked context holds sockets for the life of the process."""
+    if receiver is not None:
+        try:
+            receiver.terminate(grace_period=0)  # unacked prefetched msgs are redelivered later
+        except Exception as e:
+            log.debug("receiver terminate: %s", type(e).__name__)
+    if service is not None:
+        try:
+            service.disconnect()
+        except Exception as e:
+            log.warning("service disconnect failed: %s", type(e).__name__)
 
+
+def consume(writer, flt, stats, deadline) -> int:
     n = 0
-    service = build_service()
+    service = receiver = None
     try:
+        service = build_service()
         try:
             service.connect()
-        except PubSubPlusClientError as e:
-            if is_auth_error(str(e)):
+        except Exception as e:
+            msg = str(e)
+            if is_auth_error(msg):
                 raise AuthError("authentication failed (check the SCDS user / password / VPN settings)") from None
+            if is_tls_error(msg):
+                raise TlsError(tls_reason(msg)) from None
             raise
+        from solace.messaging.resources.queue import Queue
         log.info("connected")
         receiver = service.create_persistent_message_receiver_builder().build(
             Queue.durable_non_exclusive_queue(os.environ["SCDS_" + SOURCE.upper() + "_QUEUE"]))
         receiver.start()
         log.info("bound to queue")
+        if getattr(stats, "on_connected", None):
+            stats.on_connected()  # only now is the attempt a success (resets backoff / failure count)
         stats.set_state("connected")
         pending, batch_start = [], time.monotonic()
         while not STOP.is_set() and (deadline is None or time.time() < deadline):
@@ -303,15 +388,8 @@ def consume(writer, flt, stats, deadline) -> int:
             stats.write()
         if pending:
             n += _flush(receiver, writer, pending)
-        try:
-            receiver.terminate(grace_period=0)  # unacked prefetched msgs are redelivered later
-        except Exception:
-            pass
     finally:
-        try:
-            service.disconnect()
-        except Exception:
-            pass
+        _release(service, receiver)
     return n
 
 
@@ -387,6 +465,16 @@ def blocklist_path() -> Path:
 PARK_POLL_S = 10.0
 
 
+def sleep_interruptible(seconds: float, stats, step: float = 5.0):
+    """Wait out a backoff, still refreshing the status file (so health sees 'silence', not 'down') and
+    returning early on SIGTERM/SIGINT."""
+    left = seconds
+    while left > 0 and not STOP.is_set():
+        STOP.wait(min(step, left))
+        left -= step
+        stats.write()
+
+
 def hold(stats, state, err, status_dir, exit_on_park, code, resumable):
     """Park IN-PROCESS: record the state, then wait (no reconnecting, no exit) until SIGTERM/SIGINT.
     resumable (auth park): returns None as soon as the park marker is removed (`swim.health --unpark`),
@@ -456,7 +544,21 @@ def main(argv=None) -> int:
     log.info("source=%s archive codec=%s filter=%s", SOURCE, writer.codec, "on" if flt_cfg.get("enabled", True) else "off")
 
     deadline = time.time() + args.minutes * 60 if args.minutes else None
-    total, backoff, first = 0, 5, True
+    total, first = 0, True
+    backoff = Backoff()
+
+    def connected():
+        backoff.reset()
+        stats.tls_reason = None
+        stats.consecutive_failures = 0
+        stats.backoff_s = 0
+
+    stats.on_connected = connected
+
+    def give_up(why):
+        log.error("safety net: %s; exiting %d so the service manager restarts a clean process", why, EXIT_RESTART)
+        stats.set_state("restarting", why)
+        return EXIT_RESTART
     try:
         while not STOP.is_set() and (deadline is None or time.time() < deadline):
             if monitor.park_path(status_dir, SOURCE).exists():
@@ -466,25 +568,38 @@ def main(argv=None) -> int:
                 if r is not None:
                     return r
                 continue
+            fds = open_fds()
+            if fds > max_open_fds():
+                return give_up(f"{fds} open file descriptors (limit {max_open_fds()})")
             if not first:
                 stats.reconnect()
             first = False
             try:
                 got = consume(writer, flt, stats, deadline)
                 total += got
-                if got:
-                    backoff = 5
+                if STOP.is_set() or (deadline is not None and time.time() >= deadline):
+                    break
+                # consume() returned without STOP/deadline: it ran to its end; treat as a clean session
+                backoff.reset()
             except AuthError as e:
                 log.error("%s", e)
                 monitor.park(status_dir, SOURCE, "authentication failure")
                 alert_auth_failure(SOURCE)
                 continue  # the loop head parks (waits) before any further connection attempt
             except Exception as e:
-                err = f"{type(e).__name__}: {redact(str(e))[:200]}"
-                log.warning("transient error (%s): reconnecting in %ss", err, backoff)
-                stats.set_state("reconnecting", err)
-                STOP.wait(backoff)  # interruptible by SIGTERM/SIGINT
-                backoff = min(backoff * 2, 60)
+                tls = isinstance(e, TlsError)
+                err = f"TlsError: {e.reason}" if tls else f"{type(e).__name__}: {redact(str(e))[:200]}"
+                delay = backoff.next()
+                stats.consecutive_failures, stats.backoff_s = backoff.failures, delay
+                if tls:
+                    stats.tls_reason = e.reason
+                    log.warning("tls_error (%s): attempt %d failed, retrying in %.0fs", e.reason, backoff.failures, delay)
+                else:
+                    log.warning("transient error (%s): attempt %d failed, reconnecting in %.0fs", err, backoff.failures, delay)
+                stats.set_state("tls_error" if tls else "reconnecting", err)
+                if backoff.failures >= MAX_CONSECUTIVE_FAILURES:
+                    return give_up(f"{backoff.failures} consecutive connection failures")
+                sleep_interruptible(delay, stats)
         stats.set_state("stopped")
     finally:
         writer.close()

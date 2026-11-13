@@ -62,6 +62,9 @@ class Stats:
         self._minutes = deque()  # (minute_epoch, received, kept)
         self._next_write = 0.0
         self.bytes_written = 0
+        self.tls_reason = None  # sub-code name of the last TLS failure; cleared on connect
+        self.consecutive_failures = 0
+        self.backoff_s = 0
 
     def message(self, kept: bool, reason: str = ""):
         now = self.clock()
@@ -110,6 +113,8 @@ class Stats:
             "reconnect_epochs_24h": [round(t) for t in self.reconnects],
             "archive_codec": self.codec, "archive_bytes_written": self.bytes_written,
             "decisions": dict(self.reasons.most_common(25)), "last_error": self.last_error,
+            "tls_reason": self.tls_reason, "consecutive_failures": self.consecutive_failures,
+            "backoff_s": self.backoff_s,
         }
 
     def write(self, force=False):
