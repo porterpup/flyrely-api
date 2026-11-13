@@ -1,7 +1,9 @@
 """SWIM consumer reconnect safety: resource release, backoff, TLS errors, restart safety net.
 Mocks only; no network, no sleeping."""
 import json
+import socket
 import sys
+import threading
 
 import pytest
 
@@ -61,19 +63,43 @@ def status(tmp_path):
     return json.loads((tmp_path / "status" / "tfms.json").read_text())
 
 
-def test_tls_error_recorded_and_backoff_grows(loop_env, monkeypatch, tmp_path):
+def test_tls_error_recorded_then_restart_after_two(loop_env, monkeypatch, tmp_path):
     states = []
     real = monitor.Stats.set_state
     monkeypatch.setattr(monitor.Stats, "set_state", lambda self, st, err=None: (states.append(st), real(self, st, err)))
     monkeypatch.setattr(consumer, "build_service", lambda: FakeService(CERT_MSG))
-    monkeypatch.setattr(consumer, "MAX_CONSECUTIVE_FAILURES", 6)
     assert run_main(tmp_path) == consumer.EXIT_RESTART
-    assert loop_env == [5, 10, 20, 40, 80]  # the 6th failure exits instead of sleeping
+    assert loop_env == [5]  # 2nd consecutive TLS error exits for a clean restart instead of waiting
     assert "tls_error" in states
     st = status(tmp_path)
     assert st["tls_reason"] == "SOLCLIENT_SUBCODE_UNTRUSTED_CERTIFICATE"
-    assert st["consecutive_failures"] == 6
+    assert st["consecutive_failures"] == 2
     assert FakeService.live == 0
+
+
+def test_backoff_grows_on_repeated_failures(loop_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(consumer, "build_service", lambda: FakeService("network unreachable"))
+    monkeypatch.setenv("SWIM_MAX_CONSECUTIVE_FAILURES", "6")
+    assert run_main(tmp_path) == consumer.EXIT_RESTART
+    assert loop_env == [5, 10, 20, 40, 80]
+
+
+def test_bad_env_values_fall_back(loop_env, monkeypatch, tmp_path):
+    monkeypatch.setenv("SWIM_MAX_CONSECUTIVE_FAILURES", "abc")
+    monkeypatch.setenv("SWIM_MAX_OPEN_FDS", "abc")
+    monkeypatch.setattr(consumer, "build_service", lambda: FakeService("network unreachable"))
+    assert run_main(tmp_path) == consumer.EXIT_RESTART
+    assert len(loop_env) == 29  # default 30
+
+
+def test_hostname_mismatch_is_a_config_error_not_a_retry_loop(loop_env, monkeypatch, tmp_path):
+    built = []
+    monkeypatch.setattr(consumer, "build_service",
+                        lambda: built.append(1) or FakeService("SOLCLIENT_SUBCODE_UNTRUSTED_COMMON_NAME"))
+    rc = consumer.main(["--source", "tfms", "--out", str(tmp_path / "out"),
+                        "--status-dir", str(tmp_path / "status"), "--exit-on-park"])
+    assert rc == 2 and built == [1] and loop_env == []
+    assert status(tmp_path)["state"] == "config_error"
 
 
 def test_backoff_caps_at_ten_minutes():
@@ -151,3 +177,65 @@ def test_health_silence_alert_still_fires_with_tls_reason(tmp_path):
     st.set_state("tls_error", "TlsError: x")
     probs = health.check(tmp_path, ["tfms"], tmp_path, now=1000.0 + 3600, max_silence_min=10, stale_status_min=1e9)
     assert "tfms:silence" in probs and "UNTRUSTED_CERTIFICATE" in probs["tfms:silence"]
+
+
+class AlreadyDisconnectedService:
+    """Mimics solace 1.11: after a failed connect the state is DISCONNECTED, so disconnect() returns early and
+    only session_cleanup() frees the context."""
+
+    def __init__(self, cleanup_raises=False):
+        self.cleaned = 0
+        outer = self
+
+        class Session:
+            def session_cleanup(self):
+                outer.cleaned += 1
+                if cleanup_raises:
+                    raise RuntimeError("boom")
+
+        self._session = Session()
+
+    def connect(self):
+        raise Exception("Connection refused")
+
+    def disconnect(self):
+        return None  # "already disconnected": nothing freed
+
+
+@pytest.mark.parametrize("cleanup_raises", [False, True])
+def test_session_cleanup_called_even_when_disconnect_returns_early(monkeypatch, cleanup_raises):
+    svc = AlreadyDisconnectedService(cleanup_raises)
+    monkeypatch.setattr(consumer, "build_service", lambda: svc)
+    with pytest.raises(Exception, match="Connection refused"):  # a cleanup failure must not mask the real error
+        consumer.consume(None, None, None, None)
+    assert svc.cleaned == 1
+
+
+def test_release_tolerates_services_without_a_session():
+    consumer._release(object(), None)  # no disconnect, no _session: must not raise
+
+
+def test_real_library_refused_connection_does_not_leak(monkeypatch, tmp_path):
+    pytest.importorskip("solace.messaging.messaging_service")
+    if consumer.open_fds() < 0:
+        pytest.skip("no fd listing on this platform")
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]  # closed again on exit: nothing listens, so connect is refused
+    for k, v in ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("SCDS_TFMS_URL", f"tcps://127.0.0.1:{port}")
+    monkeypatch.setenv("SCDS_TRUST_STORE_DIR", str(tmp_path))
+    (tmp_path / "ca.pem").write_text("x")
+    monkeypatch.setattr(consumer, "SOURCE", "tfms")
+
+    def attempt():
+        with pytest.raises(Exception):
+            consumer.consume(None, None, None, None)
+
+    attempt()  # warm-up: one-time library fds/threads
+    fds0, th0 = consumer.open_fds(), threading.active_count()
+    for _ in range(5):
+        attempt()
+    assert consumer.open_fds() <= fds0 + 1
+    assert threading.active_count() <= th0 + 1

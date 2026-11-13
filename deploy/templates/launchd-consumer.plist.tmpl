@@ -27,9 +27,11 @@
     <true/>
     <!-- Plain KeepAlive: restart whenever the process dies. The consumer never exits on its own for an
          authentication failure or a configuration error: it parks IN-PROCESS (status "parked" /
-         "config_error", no connection attempts) and waits, so there is nothing to respawn. It does exit 4
-         (safety net: 30 consecutive connect failures or too many open file descriptors) so this
-         KeepAlive brings it back as a clean process. -->
+         "config_error", no connection attempts) and waits, so there is nothing to respawn. It does exit 4 (safety net: 2 consecutive
+         TLS errors, 30 consecutive connect failures, or too many open file descriptors) so this
+         KeepAlive brings it back as a clean process. Background: on 2026-11-13 the trust-store folder
+         lived in $TMPDIR and macOS temp cleanup emptied it, so every reconnect failed with "untrusted
+         certificate" until a restart. The folder is now data/swim/trust/ and is rebuilt if empty. -->
     <key>KeepAlive</key>
     <true/>
     <!-- at most one (re)start per minute, so a crash loop cannot hammer SWIM -->
