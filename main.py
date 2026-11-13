@@ -150,6 +150,8 @@ app.add_middleware(
 
 import feedback  # noqa: E402
 feedback.mount(app)
+import flight_reports  # noqa: E402
+flight_reports.mount(app)
 
 # =============================================================================
 # Usage Logging

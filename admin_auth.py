@@ -22,8 +22,8 @@ CACHE_TTL_SECONDS = 60
 CACHE_MAX = 256
 SUPABASE_TIMEOUT_SECONDS = 5.0
 
-# sha256(token) -> (expiry monotonic time, email). Only successful validations are cached.
-_cache: dict[str, tuple[float, str]] = {}
+# sha256(token) -> (expiry monotonic time, user id, email). Only successful validations are cached.
+_cache: dict[str, tuple[float, str, str]] = {}
 
 
 def clear_cache() -> None:
@@ -44,6 +44,12 @@ def _bearer(authorization: Optional[str]) -> Optional[str]:
 
 async def _lookup_email(token: str) -> str:
     """Email of the Supabase user behind `token`. 401 if Supabase rejects it, 503 if it can't be reached."""
+    return (await _lookup_user(token))[1]
+
+
+async def _lookup_user(token: str) -> tuple[str, str]:
+    """(user id, email) of the Supabase user behind `token`; the id is "" if Supabase sent none.
+    401 if Supabase rejects the token, 503 if it can't be reached."""
     url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
     anon = os.getenv("SUPABASE_ANON_KEY", "").strip()
     if not url or not anon:
@@ -53,7 +59,7 @@ async def _lookup_email(token: str) -> str:
     key = hashlib.sha256(token.encode()).hexdigest()
     hit = _cache.get(key)
     if hit and hit[0] > time.monotonic():
-        return hit[1]
+        return hit[1], hit[2]
 
     try:
         async with httpx.AsyncClient(timeout=SUPABASE_TIMEOUT_SECONDS) as client:
@@ -81,8 +87,9 @@ async def _lookup_email(token: str) -> str:
         now = time.monotonic()
         for k in [k for k, v in _cache.items() if v[0] <= now] or list(_cache)[:CACHE_MAX // 2]:
             _cache.pop(k, None)
-    _cache[key] = (time.monotonic() + CACHE_TTL_SECONDS, email)
-    return email
+    user_id = str(user.get("id") or "")
+    _cache[key] = (time.monotonic() + CACHE_TTL_SECONDS, user_id, email)
+    return user_id, email
 
 
 async def require_admin(authorization: Optional[str] = Header(default=None)) -> str:
