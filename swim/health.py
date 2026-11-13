@@ -63,7 +63,13 @@ def check(status_dir: Path, sources, root: Path, now: float, max_silence_min=10.
             problems[f"{src}:restarts"] = f"{src}: {len(restarted)} process restarts in the last hour (threshold {restarts_per_hour})."
         ref = st.get("last_message_epoch") or st.get("first_started_epoch") or st.get("started_epoch") or upd
         if now - ref > max_silence_min * 60:
-            problems[f"{src}:silence"] = (f"{src}: no messages for {(now - ref) / 60:.0f} min "
+            last, began = st.get("last_message_epoch"), st.get("started_epoch")
+            if last and began and began > last:  # a restart in between: say so instead of a bare silence time
+                what = (f"no messages since restart ({(now - began) / 60:.0f} min ago); last message "
+                        + (f"{(now - last) / 86400:.1f} days" if now - last >= 86400 else f"{(now - last) / 60:.0f} min") + " ago")
+            else:
+                what = f"no messages for {(now - ref) / 60:.0f} min"
+            problems[f"{src}:silence"] = (f"{src}: {what} "
                                           f"(state={st.get('state')}, reconnects={st.get('reconnect_count')}"
                                           + (f", tls_reason={st['tls_reason']}" if st.get("tls_reason") else "") + ").")
         recent = [t for t in st.get("reconnect_epochs_24h", []) if now - t <= reconnect_window_min * 60]

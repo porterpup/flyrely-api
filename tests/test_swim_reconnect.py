@@ -1,6 +1,7 @@
 """SWIM consumer reconnect safety: resource release, backoff, TLS errors, restart safety net.
 Mocks only; no network, no sleeping."""
 import json
+import os
 import socket
 import sys
 import threading
@@ -176,6 +177,51 @@ def test_trust_store_refreshed_once_per_process_start(monkeypatch, tmp_path):
     assert not (tmp_path / "trust" / "tfms" / "stale.pem").exists()  # repaired
     assert list((tmp_path / "trust" / "tfms").glob("*.pem"))
     assert [p.name for p in (tmp_path / "trust").iterdir()] == ["tfms"]  # no temp siblings left
+
+
+def test_hostname_mismatch_retries_slowly_in_process(loop_env, monkeypatch, tmp_path):
+    calls = []
+    stop = threading.Event()
+    monkeypatch.setattr(consumer, "STOP", stop)
+
+    def fake_consume(writer, flt, stats, deadline):
+        calls.append(1)
+        if len(calls) == 1:
+            raise consumer.HostnameMismatchError("TLS hostname / IP mismatch")
+        stop.set()
+        return 0
+
+    monkeypatch.setattr(consumer, "consume", fake_consume)
+    assert run_main(tmp_path) == 0
+    assert calls == [1, 1] and loop_env == [consumer.HOSTNAME_RETRY_S]
+
+
+def test_check_does_not_touch_live_status(loop_env, tmp_path):
+    sd = tmp_path / "status"
+    monitor.write_json_atomic(sd / "tfms.json", {"state": "connected", "restart_epochs_24h": [1.0]})
+    before = (sd / "tfms.json").read_text()
+    consumer.main(["--source", "tfms", "--out", str(tmp_path / "out"), "--status-dir", str(sd), "--check"])
+    assert (sd / "tfms.json").read_text() == before
+
+
+def test_silence_message_after_restart(tmp_path):
+    now = 9_000_000.0
+    monitor.write_json_atomic(tmp_path / "tfms.json", {
+        "state": "reconnecting", "updated_epoch": now, "started_epoch": now - 600,
+        "last_message_epoch": now - 3 * 86400})
+    msg = health.check(tmp_path, ["tfms"], tmp_path, now=now)["tfms:silence"]
+    assert "since restart" in msg and "3.0 days" in msg
+
+
+def test_clean_trust_leftovers(monkeypatch, tmp_path):
+    root = tmp_path / "trust"
+    keep = [root / "tfms", root / f"tfms.tmp{os.getpid()}"]
+    dead = [root / "tfms.tmp999999", root / "sfdps.old999998"]
+    for d in keep + dead:
+        d.mkdir(parents=True)
+    monkeypatch.setattr(consumer, "TRUST_ROOT", root)
+    consumer.clean_trust_leftovers()
+    assert all(d.exists() for d in keep) and not any(d.exists() for d in dead)
 
 
 def test_backoff_caps_at_ten_minutes():
