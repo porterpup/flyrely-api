@@ -151,3 +151,18 @@ def test_streaming_matches_old_list_based_code(tmp_path):
     got = json.loads(out.read_text())
     assert got == json.loads(json.dumps(expected))
     assert got["legs_domestic"] > 10 and got["all_carriers"]["legs_with_reg"] > 3 and got["all_carriers"]["smes_legs"] > 0
+
+
+def test_breakdown_by_hour_and_origin_has_aggregates_only():
+    t, s = fixture()
+    plain = m.analyse(date(2026, 11, 8), t, s, [])
+    assert "breakdown" not in plain
+    res = m.analyse(date(2026, 11, 8), t, s, [], with_breakdown=True)
+    bd = res["breakdown"]
+    assert bd["by_departure_hour_utc"]["12"] == {"scheduled_legs": 1, "legs_with_reg": 1, "fill": 1.0}
+    assert bd["by_departure_hour_utc"]["15"] == {"scheduled_legs": 1, "legs_with_reg": 0, "fill": 0.0}
+    assert bd["by_origin_airport"] == {}  # every origin has < 50 legs
+    t += [(ts(5), tfms(f"UAL{i}", "KORD", "KDEN", "2026-11-08T15:00:00Z")) for i in range(1000, 1050)]
+    bd = m.analyse(date(2026, 11, 8), t, s, [], with_breakdown=True)["breakdown"]
+    assert bd["by_origin_airport"]["ORD"]["scheduled_legs"] == 51 and list(bd["by_origin_airport"]) == ["ORD"]
+    assert SECRET_REG not in json.dumps(bd)
