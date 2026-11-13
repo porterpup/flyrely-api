@@ -52,6 +52,7 @@ AUTH_RE = re.compile(r"login[_ ]failure|authentication|unauthori[sz]ed|not autho
 TLS_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]*(CERT|COMMON_?NAME)[A-Z0-9_]*")
 # The library reports a wrong host as UNTRUSTED_CERTIFICATE with rc='hostname mismatch' / 'IP address mismatch'.
 HOSTNAME_RE = re.compile(r"rc='(hostname|IP address) mismatch'", re.I)  # config error: park, don't loop
+HOSTNAME_RETRY_S = 30 * 60
 TLS_EXIT_COOLDOWN_S = 30 * 60  # a 2nd TLS fast-exit within this long of the previous one is suppressed
 SUBCODE_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]+")
 BACKOFF_BASE_S = 5.0
@@ -73,6 +74,11 @@ class AuthError(Exception):
 
 class ConfigError(Exception):
     pass
+
+
+class HostnameMismatchError(ConfigError):
+    """The broker presented a certificate for another host. Usually a brief FAA rotation/failover problem, so the
+    main loop re-checks every HOSTNAME_RETRY_S (state config_error, visible to health) instead of parking forever."""
 
 
 class TlsError(Exception):
@@ -283,6 +289,27 @@ def _clean_stale_tmp_trust_dirs():
             pass
 
 
+def clean_trust_leftovers():
+    """Remove <source>.tmp<pid> / <source>.old<pid> folders left by a build that died (best effort). Folders of
+    a still-running other process are kept."""
+    try:
+        entries = list(TRUST_ROOT.iterdir())
+    except OSError:
+        return
+    for d in entries:
+        m = re.search(r"\.(?:tmp|old)(\d+)$", d.name)
+        if not m or not d.is_dir() or int(m.group(1)) == os.getpid():
+            continue
+        try:
+            os.kill(int(m.group(1)), 0)
+            continue  # that process is alive: leave its folder alone
+        except ProcessLookupError:
+            pass
+        except OSError:
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def trust_store_dir() -> str:
     """Solace wants a directory of PEM files. Called on EVERY build_service(), so a folder that vanished or was
     emptied is rebuilt instead of failing every later handshake.
@@ -394,7 +421,7 @@ def consume(writer, flt, stats, deadline) -> int:
             if is_auth_error(msg):
                 raise AuthError("authentication failed (check the SCDS user / password / VPN settings)") from None
             if HOSTNAME_RE.search(msg):
-                raise ConfigError("TLS hostname / IP mismatch (check the SCDS URL)") from None
+                raise HostnameMismatchError("TLS hostname / IP mismatch (check the SCDS URL); retrying every 30 min") from None
             if is_tls_error(msg):
                 raise TlsError(tls_reason(msg)) from None
             raise
@@ -569,10 +596,15 @@ def main(argv=None) -> int:
     load_dotenv(ENV_PATH)
     load_dotenv(ENV_PATH.with_name(ENV_PATH.name + ".alerts"))  # optional FLYRELY_ALERT_* settings
     stats = monitor.Stats(SOURCE, status_dir)
-    stats.carry_forward()  # last message time, restart history and last TLS fast-exit survive process restarts
+    if not args.check:  # --check is offline: it must never touch the live status file or the restart count
+        stats.carry_forward()  # last message time, restart history and last TLS fast-exit survive restarts
+        clean_trust_leftovers()
 
     def config_error(msg):
         log.error("%s", msg)
+        if args.check:
+            print("FAIL " + msg)
+            return 2
         return hold(stats, "config_error", msg, status_dir, args.exit_on_park, 2, resumable=False)
 
     try:
@@ -638,6 +670,12 @@ def main(argv=None) -> int:
                 total += got
                 if STOP.is_set() or (deadline is not None and time.time() >= deadline):
                     break
+            except HostnameMismatchError as e:
+                if args.exit_on_park:
+                    return config_error(str(e))
+                log.error("%s", e)
+                stats.set_state("config_error", str(e))
+                sleep_interruptible(HOSTNAME_RETRY_S, stats)
             except ConfigError as e:
                 return config_error(str(e))
             except AuthError as e:
