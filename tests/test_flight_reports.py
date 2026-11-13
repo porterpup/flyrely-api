@@ -87,6 +87,23 @@ def test_withdraw_deletes_row(monkeypatch):
     assert rows() == []
 
 
+def test_missing_answer_is_422_and_does_not_withdraw(monkeypatch):
+    as_user(monkeypatch)
+    client.post("/flight-reports", json=body(), headers=GOOD)
+    b = body()
+    del b["answer"]
+    assert client.post("/flight-reports", json=b, headers=GOOD).status_code == 422
+    assert len(rows()) == 1
+
+
+@pytest.mark.parametrize("missing", ["SUPABASE_URL", "SUPABASE_ANON_KEY"])
+def test_signin_not_configured_is_503(monkeypatch, missing):
+    monkeypatch.delenv(missing)
+    r = client.post("/flight-reports", json=body(), headers=GOOD)
+    assert r.status_code == 503 and r.json()["detail"] == "Sign-in service not configured"
+    assert client.get("/flight-reports", headers=GOOD).status_code == 503
+
+
 def test_two_users_same_flight_two_rows(monkeypatch):
     as_user(monkeypatch, uid="user-1")
     client.post("/flight-reports", json=body(), headers=GOOD)

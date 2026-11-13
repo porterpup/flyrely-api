@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS flight_report_log (
 CREATE INDEX IF NOT EXISTS idx_flight_report_log_user_ts ON flight_report_log (user_id, ts_utc);
 """
 
+# Per-process lock: it serialises the rate-limit check + write only within one process. That is fine with a single
+# uvicorn worker (as on the Mac mini); with several workers the limit could be exceeded by a small margin.
 _lock = threading.Lock()
 _ready_paths: set[str] = set()
 
@@ -94,7 +96,20 @@ class FlightReportIn(BaseModel):
     origin: str = Field(min_length=3, max_length=4)
     dest: str = Field(min_length=3, max_length=4)
     sched_dep_local: datetime  # ISO, naive local time at the origin airport
-    answer: Optional[Answer] = None
+    # Required but nullable: a missing `answer` is a 422; only an explicit null withdraws the report.
+    answer: Optional[Answer]
+
+
+def _ensure_signin_configured() -> None:
+    if not os.getenv("SUPABASE_URL", "").strip() or not os.getenv("SUPABASE_ANON_KEY", "").strip():
+        raise HTTPException(status_code=503, detail="Sign-in service not configured")
+
+
+async def require_admin_reports(authorization: Optional[str] = Header(default=None)) -> str:
+    """Admin check for GET: like require_admin, but 503 (not 403) when the sign-in service is not configured."""
+    if admin_auth._bearer(authorization) is not None:
+        _ensure_signin_configured()
+    return await admin_auth.require_admin(authorization)
 
 
 async def require_user(authorization: Optional[str] = Header(default=None)) -> Tuple[str, str]:
@@ -102,6 +117,7 @@ async def require_user(authorization: Optional[str] = Header(default=None)) -> T
     token = admin_auth._bearer(authorization)
     if token is None:
         raise HTTPException(status_code=401, detail="Sign in required", headers={"WWW-Authenticate": "Bearer"})
+    _ensure_signin_configured()
     user_id, email = await admin_auth._lookup_user(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -132,7 +148,7 @@ def _rate_limited(conn: sqlite3.Connection, user_id: str, now: datetime) -> bool
     return n >= RATE_LIMIT
 
 
-async def post_flight_report(body: FlightReportIn, user: Tuple[str, str] = Depends(require_user)):
+def post_flight_report(body: FlightReportIn, user: Tuple[str, str] = Depends(require_user)):
     user_id, email = user
     if body.sched_dep_local.tzinfo is not None:
         raise HTTPException(status_code=422, detail="sched_dep_local must be a local time without a UTC offset")
@@ -168,8 +184,8 @@ async def post_flight_report(body: FlightReportIn, user: Tuple[str, str] = Depen
     return {"status": status}
 
 
-async def list_flight_reports(limit: int = Query(default=100, ge=1, le=500),
-                              _admin: str = Depends(admin_auth.require_admin)):
+def list_flight_reports(limit: int = Query(default=100, ge=1, le=500),
+                        _admin: str = Depends(require_admin_reports)):
     with closing(_connect()) as conn:
         rows = conn.execute("SELECT * FROM flight_reports ORDER BY updated_utc DESC LIMIT ?", (limit,)).fetchall()
     items = [dict(r) for r in rows]
