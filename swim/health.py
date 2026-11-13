@@ -29,7 +29,7 @@ log = logging.getLogger("swim.health")
 
 
 def check(status_dir: Path, sources, root: Path, now: float, max_silence_min=10.0, reconnects=5,
-          reconnect_window_min=30.0, min_free_gb=10.0, stale_status_min=3.0) -> dict:
+          reconnect_window_min=30.0, min_free_gb=10.0, stale_status_min=3.0, restarts_per_hour=3) -> dict:
     """Returns {problem_key: message}. Pure function of the files on disk (offline, testable)."""
     problems = {}
     for src in sources:
@@ -55,10 +55,17 @@ def check(status_dir: Path, sources, root: Path, now: float, max_silence_min=10.
         if now - upd > stale_status_min * 60:
             problems[f"{src}:down"] = f"{src}: status not updated for {(now - upd) / 60:.0f} min (consumer down or hung)."
             continue
-        ref = st.get("last_message_epoch") or st.get("started_epoch") or upd
+        if st.get("state") in ("tls_error", "restarting"):
+            problems[f"{src}:tls"] = (f"{src}: state={st.get('state')} tls_reason={st.get('tls_reason')} "
+                                      f"last_error={st.get('last_error')}.")
+        restarted = [t for t in st.get("restart_epochs_24h", []) if now - t <= 3600]
+        if len(restarted) >= restarts_per_hour:
+            problems[f"{src}:restarts"] = f"{src}: {len(restarted)} process restarts in the last hour (threshold {restarts_per_hour})."
+        ref = st.get("last_message_epoch") or st.get("first_started_epoch") or st.get("started_epoch") or upd
         if now - ref > max_silence_min * 60:
             problems[f"{src}:silence"] = (f"{src}: no messages for {(now - ref) / 60:.0f} min "
-                                          f"(state={st.get('state')}, reconnects={st.get('reconnect_count')}).")
+                                          f"(state={st.get('state')}, reconnects={st.get('reconnect_count')}"
+                                          + (f", tls_reason={st['tls_reason']}" if st.get("tls_reason") else "") + ").")
         recent = [t for t in st.get("reconnect_epochs_24h", []) if now - t <= reconnect_window_min * 60]
         if len(recent) >= reconnects:
             problems[f"{src}:reconnects"] = (f"{src}: {len(recent)} reconnects in the last "

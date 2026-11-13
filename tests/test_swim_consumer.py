@@ -126,14 +126,3 @@ def test_dedupe_fields_and_per_run_file(tmp_path):
 def test_inspector_property_allowlist():
     assert "solace_routing_dest_name" not in it.ALLOWED_PROPS
     assert "MessageType" in it.ALLOWED_PROPS
-
-
-def test_trust_store_built_once(monkeypatch):
-    monkeypatch.delenv("SCDS_TRUST_STORE_DIR", raising=False)
-    monkeypatch.setattr(consumer, "_TRUST_DIR", None)
-    monkeypatch.setattr(consumer.sys, "platform", "darwin")  # the certifi-split path (Linux uses /etc/ssl/certs)
-    a = consumer.trust_store_dir()
-    assert a != "/etc/ssl/certs" and a.startswith(consumer.tempfile.gettempdir()[:4])
-    assert a == consumer.trust_store_dir()
-    assert list(Path(a).glob("*.pem"))
-    shutil.rmtree(a)

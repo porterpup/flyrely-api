@@ -5,7 +5,8 @@ Binds to the persistent Solace queue, filters each message at receive time
 process run per hour (swim/archive.py, zstd or gzip), fsyncs, and only then
 acknowledges the whole batch (dropped messages are acknowledged too).
 Writes a heartbeat file (swim/monitor.py). Exit codes: 0 clean, 2 config error,
-3 authentication failure. On a config error or auth failure the service parks IN-PROCESS (status
+3 authentication failure, 4 safety-net exit (too many consecutive failures or open file descriptors: launchd
+KeepAlive restarts a clean process). On a config error or auth failure the service parks IN-PROCESS (status
 `config_error` / `parked`, no connection attempts, waits until SIGTERM); an auth park resumes by itself after
 `python -m swim.health --unpark <source>`. --exit-on-park exits with 2/3 instead (manual runs).
 
@@ -19,7 +20,6 @@ Env:    FLYRELY_ENV_FILE (default: <repo>/.env), SCDS_TRUST_STORE_DIR,
         SWIM_BLOCKLIST_FILE (LADD block list, default data/ladd_blocklist.txt)
 """
 import argparse
-import atexit
 import base64
 import hashlib
 import json
@@ -47,6 +47,18 @@ SOURCE = "tfms"  # set by main()
 FIELDS = ("URL", "USER", "PASSWORD", "QUEUE", "VPN")
 AUTH_RE = re.compile(r"login[_ ]failure|authentication|unauthori[sz]ed|not authori[sz]ed|"
                      r"authori[sz]ation failed|invalid (user|client) ?name", re.I)
+# TLS is classified by Solace SUB-CODE only, never by words like SSL/TLS: tcps connections report ordinary resets as
+# "SSL 'SSL-client' cannot read ... Connection reset by peer" under SOLCLIENT_SUBCODE_COMMUNICATION_ERROR (transient).
+TLS_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]*(CERT|COMMON_?NAME)[A-Z0-9_]*")
+# The library reports a wrong host as UNTRUSTED_CERTIFICATE with rc='hostname mismatch' / 'IP address mismatch'.
+HOSTNAME_RE = re.compile(r"rc='(hostname|IP address) mismatch'", re.I)  # config error: park, don't loop
+TLS_EXIT_COOLDOWN_S = 30 * 60  # a 2nd TLS fast-exit within this long of the previous one is suppressed
+SUBCODE_RE = re.compile(r"SOLCLIENT_SUBCODE_[A-Z0-9_]+")
+BACKOFF_BASE_S = 5.0
+BACKOFF_CAP_S = 600.0  # 10 min
+MAX_CONSECUTIVE_FAILURES = 30  # env SWIM_MAX_CONSECUTIVE_FAILURES overrides (read in main())
+TLS_FAILURES_BEFORE_RESTART = 2  # a TLS error that repeats means this process is wedged (e.g. emptied trust store)
+EXIT_RESTART = 4
 BATCH_MAX = 100
 BATCH_SECONDS = 1.0
 RUN_ID = f"{datetime.now(timezone.utc):%H%M%S}p{os.getpid()}"  # one file per process run
@@ -61,6 +73,62 @@ class AuthError(Exception):
 
 class ConfigError(Exception):
     pass
+
+
+class TlsError(Exception):
+    """Certificate / TLS handshake failure on connect. Retried with backoff, but a repeat means this process is
+    wedged, so main() exits for a clean restart. Known cause (2026-11-13): the trust-store folder was in $TMPDIR and
+    macOS temp cleanup emptied it, so every later handshake said 'untrusted certificate'; a restart rebuilt it."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class Backoff:
+    """Exponential delay for consecutive failures, capped; reset() after a successful connect."""
+
+    def __init__(self, base=BACKOFF_BASE_S, cap=BACKOFF_CAP_S):
+        self.base, self.cap, self.failures = base, cap, 0
+
+    def next(self) -> float:
+        delay = min(self.base * 2 ** min(self.failures, 30), self.cap)
+        self.failures += 1
+        return delay
+
+    def reset(self):
+        self.failures = 0
+
+
+def open_fds() -> int:
+    """Open file descriptors of this process (-1 if unknown)."""
+    for d in ("/dev/fd", "/proc/self/fd"):
+        try:
+            return len(os.listdir(d))
+        except OSError:
+            continue
+    return -1
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def max_open_fds() -> int:
+    """Safety-net threshold: SWIM_MAX_OPEN_FDS, else half the soft RLIMIT_NOFILE (default 500 if unknown)."""
+    if os.environ.get("SWIM_MAX_OPEN_FDS", "").strip().isdigit():
+        return int(os.environ["SWIM_MAX_OPEN_FDS"])
+    try:
+        import resource
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        if soft > 0:
+            return max(int(soft * 0.5), 50)
+    except (ImportError, OSError, ValueError):
+        pass
+    return 500
 
 
 def secret_keys(sources=SOURCES):
@@ -165,34 +233,75 @@ def is_auth_error(message: str) -> bool:
     return bool(AUTH_RE.search(message))
 
 
-_TRUST_DIR = None
+def is_tls_error(message: str) -> bool:
+    return bool(TLS_RE.search(message))
+
+
+def tls_reason(message: str) -> str:
+    """Short, secret-free reason: the Solace sub-code name if present, else a generic label."""
+    m = SUBCODE_RE.search(message)
+    return m.group(0) if m else "TLS_ERROR"
+
+
+TRUST_ROOT = DATA_ROOT / "trust"  # persistent (data/ is gitignored); NOT $TMPDIR, which macOS cleans periodically
 
 
 LINUX_CERT_DIR = Path("/etc/ssl/certs")
 
 
+_TRUST_REFRESHED = set()  # trust dirs already rebuilt by this process
+
+
+def _build_trust_dir(out: Path):
+    """(Re)build out/ from certifi: write a temp sibling, then swap it in, so a reader never sees a half-written
+    folder and a certifi upgrade or an interrupted earlier build is repaired."""
+    import certifi
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f"{out.name}.tmp{os.getpid()}")
+    old = out.with_name(f"{out.name}.old{os.getpid()}")
+    for d in (tmp, old):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+    tmp.mkdir()
+    pems = re.findall(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+                      Path(certifi.where()).read_text(), re.S)
+    for i, pem in enumerate(pems):
+        (tmp / f"ca{i:03d}.pem").write_text(pem + "\n")
+    if out.exists():
+        os.rename(out, old)
+    os.rename(tmp, out)
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def _clean_stale_tmp_trust_dirs():
+    """Remove empty swim_trust_* folders left in $TMPDIR by older versions (best effort)."""
+    for d in Path(tempfile.gettempdir()).glob("swim_trust_*"):
+        try:
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+        except OSError:
+            pass
+
+
 def trust_store_dir() -> str:
-    """Solace wants a directory of PEM files.
+    """Solace wants a directory of PEM files. Called on EVERY build_service(), so a folder that vanished or was
+    emptied is rebuilt instead of failing every later handshake.
     1. SCDS_TRUST_STORE_DIR if set.
     2. Linux: the system directory /etc/ssl/certs (needs the ca-certificates package).
-    3. Otherwise (macOS, python.org Python has no PEM directory of its own): split certifi's CA
-       bundle into a temp dir once per process, removed on exit."""
-    global _TRUST_DIR
+    3. Otherwise (macOS, python.org Python has no PEM directory of its own): certifi's CA bundle split into
+       data/swim/trust/<source>/ (persistent), rebuilt once per process start and whenever missing or empty."""
     d = os.environ.get("SCDS_TRUST_STORE_DIR")
     if d:
         return d
     if sys.platform.startswith("linux") and LINUX_CERT_DIR.is_dir() and any(LINUX_CERT_DIR.iterdir()):
         return str(LINUX_CERT_DIR)
-    if _TRUST_DIR is None:
-        import certifi
-        out = Path(tempfile.mkdtemp(prefix="swim_trust_"))
-        atexit.register(shutil.rmtree, out, True)
-        pems = re.findall(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
-                          Path(certifi.where()).read_text(), re.S)
-        for i, pem in enumerate(pems):
-            (out / f"ca{i:03d}.pem").write_text(pem + "\n")
-        _TRUST_DIR = str(out)
-    return _TRUST_DIR
+    out = TRUST_ROOT / SOURCE
+    if str(out) not in _TRUST_REFRESHED or not (out.is_dir() and any(out.glob("*.pem"))):
+        log.info("trust store: rebuilding (once per process start, or missing/empty)")
+        _TRUST_REFRESHED.add(str(out))
+        _build_trust_dir(out)
+        _clean_stale_tmp_trust_dirs()
+    return str(out)
 
 
 # ------------------------------------------------------------------ archive
@@ -250,24 +359,53 @@ def _flush(receiver, writer, pending) -> int:
     return len(pending)
 
 
-def consume(writer, flt, stats, deadline) -> int:
-    from solace.messaging.resources.queue import Queue
-    from solace.messaging.errors.pubsubplus_client_error import PubSubPlusClientError
+def _release(service, receiver):
+    """Free everything one attempt created (receiver, then the messaging service and its Solace context).
+    Runs in a finally on every attempt: a leaked context holds sockets for the life of the process."""
+    if receiver is not None:
+        try:
+            receiver.terminate(grace_period=0)  # unacked prefetched msgs are redelivered later
+        except Exception as e:
+            log.debug("receiver terminate: %s", type(e).__name__)
+    if service is not None:
+        try:
+            service.disconnect()
+        except Exception as e:
+            log.warning("service disconnect failed: %s", type(e).__name__)
+        # solace-pubsubplus 1.11: a failed connect or dropped session marks the service DISCONNECTED before
+        # connect() returns, so disconnect() returns early ("already disconnected") and never frees the Solace
+        # context (about 2 fds and 1 thread leaked per attempt). session_cleanup() does free it and is safe to
+        # call twice. Private API, so guarded: if it ever disappears we only lose this extra release.
+        try:
+            service._session.session_cleanup()
+        except Exception as e:
+            log.debug("session cleanup: %s", type(e).__name__)
 
+
+def consume(writer, flt, stats, deadline) -> int:
     n = 0
-    service = build_service()
+    service = receiver = None
     try:
+        service = build_service()
         try:
             service.connect()
-        except PubSubPlusClientError as e:
-            if is_auth_error(str(e)):
+        except Exception as e:
+            msg = str(e)
+            if is_auth_error(msg):
                 raise AuthError("authentication failed (check the SCDS user / password / VPN settings)") from None
+            if HOSTNAME_RE.search(msg):
+                raise ConfigError("TLS hostname / IP mismatch (check the SCDS URL)") from None
+            if is_tls_error(msg):
+                raise TlsError(tls_reason(msg)) from None
             raise
+        from solace.messaging.resources.queue import Queue
         log.info("connected")
         receiver = service.create_persistent_message_receiver_builder().build(
             Queue.durable_non_exclusive_queue(os.environ["SCDS_" + SOURCE.upper() + "_QUEUE"]))
         receiver.start()
         log.info("bound to queue")
+        if getattr(stats, "on_connected", None):
+            stats.on_connected()  # only now is the attempt a success (resets backoff / failure count)
         stats.set_state("connected")
         pending, batch_start = [], time.monotonic()
         while not STOP.is_set() and (deadline is None or time.time() < deadline):
@@ -303,15 +441,8 @@ def consume(writer, flt, stats, deadline) -> int:
             stats.write()
         if pending:
             n += _flush(receiver, writer, pending)
-        try:
-            receiver.terminate(grace_period=0)  # unacked prefetched msgs are redelivered later
-        except Exception:
-            pass
     finally:
-        try:
-            service.disconnect()
-        except Exception:
-            pass
+        _release(service, receiver)
     return n
 
 
@@ -387,6 +518,16 @@ def blocklist_path() -> Path:
 PARK_POLL_S = 10.0
 
 
+def sleep_interruptible(seconds: float, stats, step: float = 5.0):
+    """Wait out a backoff, still refreshing the status file (so health sees 'silence', not 'down') and
+    returning early on SIGTERM/SIGINT."""
+    left = seconds
+    while left > 0 and not STOP.is_set():
+        STOP.wait(min(step, left))
+        left -= step
+        stats.write()
+
+
 def hold(stats, state, err, status_dir, exit_on_park, code, resumable):
     """Park IN-PROCESS: record the state, then wait (no reconnecting, no exit) until SIGTERM/SIGINT.
     resumable (auth park): returns None as soon as the park marker is removed (`swim.health --unpark`),
@@ -428,6 +569,7 @@ def main(argv=None) -> int:
     load_dotenv(ENV_PATH)
     load_dotenv(ENV_PATH.with_name(ENV_PATH.name + ".alerts"))  # optional FLYRELY_ALERT_* settings
     stats = monitor.Stats(SOURCE, status_dir)
+    stats.carry_forward()  # last message time, restart history and last TLS fast-exit survive process restarts
 
     def config_error(msg):
         log.error("%s", msg)
@@ -456,7 +598,26 @@ def main(argv=None) -> int:
     log.info("source=%s archive codec=%s filter=%s", SOURCE, writer.codec, "on" if flt_cfg.get("enabled", True) else "off")
 
     deadline = time.time() + args.minutes * 60 if args.minutes else None
-    total, backoff, first = 0, 5, True
+    total, first = 0, True
+    backoff = Backoff()
+
+    def connected():
+        nonlocal tls_streak
+        tls_streak = 0
+        backoff.reset()
+        stats.tls_reason = None
+        stats.consecutive_failures = 0
+        stats.backoff_s = 0
+
+    stats.on_connected = connected
+    max_failures = _env_int("SWIM_MAX_CONSECUTIVE_FAILURES", MAX_CONSECUTIVE_FAILURES)
+    fd_limit = max_open_fds()
+    tls_streak = 0
+
+    def give_up(why):
+        log.error("safety net: %s; exiting %d so the service manager restarts a clean process", why, EXIT_RESTART)
+        stats.set_state("restarting", why)
+        return EXIT_RESTART
     try:
         while not STOP.is_set() and (deadline is None or time.time() < deadline):
             if monitor.park_path(status_dir, SOURCE).exists():
@@ -466,25 +627,46 @@ def main(argv=None) -> int:
                 if r is not None:
                     return r
                 continue
+            fds = open_fds()
+            if fds > fd_limit:
+                return give_up(f"{fds} open file descriptors (limit {fd_limit})")
             if not first:
                 stats.reconnect()
             first = False
             try:
                 got = consume(writer, flt, stats, deadline)
                 total += got
-                if got:
-                    backoff = 5
+                if STOP.is_set() or (deadline is not None and time.time() >= deadline):
+                    break
+            except ConfigError as e:
+                return config_error(str(e))
             except AuthError as e:
                 log.error("%s", e)
                 monitor.park(status_dir, SOURCE, "authentication failure")
                 alert_auth_failure(SOURCE)
                 continue  # the loop head parks (waits) before any further connection attempt
             except Exception as e:
-                err = f"{type(e).__name__}: {redact(str(e))[:200]}"
-                log.warning("transient error (%s): reconnecting in %ss", err, backoff)
-                stats.set_state("reconnecting", err)
-                STOP.wait(backoff)  # interruptible by SIGTERM/SIGINT
-                backoff = min(backoff * 2, 60)
+                tls = isinstance(e, TlsError)
+                tls_streak = tls_streak + 1 if tls else 0
+                err = f"TlsError: {e.reason}" if tls else f"{type(e).__name__}: {redact(str(e))[:200]}"
+                delay = backoff.next()
+                stats.consecutive_failures, stats.backoff_s = backoff.failures, delay
+                if tls:
+                    stats.tls_reason = e.reason
+                    log.warning("tls_error (%s): attempt %d failed, retrying in %.0fs", e.reason, backoff.failures, delay)
+                else:
+                    log.warning("transient error (%s): attempt %d failed, reconnecting in %.0fs", err, backoff.failures, delay)
+                stats.set_state("tls_error" if tls else "reconnecting", err)
+                if tls_streak >= TLS_FAILURES_BEFORE_RESTART:
+                    prev = stats.last_tls_exit
+                    if prev is None or time.time() - prev >= TLS_EXIT_COOLDOWN_S:
+                        stats.last_tls_exit = time.time()
+                        return give_up(f"{tls_streak} consecutive TLS errors ({e.reason})")
+                    log.warning("tls fast-exit suppressed: already restarted for TLS %.0f min ago; "
+                                "using normal backoff", (time.time() - prev) / 60)
+                if backoff.failures >= max_failures:
+                    return give_up(f"{backoff.failures} consecutive connection failures")
+                sleep_interruptible(delay, stats)
         stats.set_state("stopped")
     finally:
         writer.close()

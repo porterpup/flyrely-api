@@ -320,21 +320,26 @@ def test_trust_store_linux_uses_system_dir(monkeypatch, tmp_path):
     (certs / "a.pem").write_text("x")
     monkeypatch.delenv("SCDS_TRUST_STORE_DIR", raising=False)
     monkeypatch.setattr(consumer, "LINUX_CERT_DIR", certs)
-    monkeypatch.setattr(consumer, "_TRUST_DIR", None)
     monkeypatch.setattr(sys, "platform", "linux")
     assert consumer.trust_store_dir() == str(certs)
     monkeypatch.setenv("SCDS_TRUST_STORE_DIR", "/override")
     assert consumer.trust_store_dir() == "/override"
 
 
-def test_trust_store_macos_splits_certifi_once(monkeypatch):
+def test_trust_store_macos_splits_certifi_persistently_and_rebuilds(monkeypatch, tmp_path):
     monkeypatch.delenv("SCDS_TRUST_STORE_DIR", raising=False)
     monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(consumer, "_TRUST_DIR", None)
+    monkeypatch.setattr(consumer, "TRUST_ROOT", tmp_path / "trust")
+    monkeypatch.setattr(consumer, "SOURCE", "tfms")
     d = consumer.trust_store_dir()
-    assert d == consumer.trust_store_dir() and list(Path(d).glob("*.pem"))
+    assert d.startswith(str(tmp_path)) and list(Path(d).glob("*.pem"))
+    assert d == consumer.trust_store_dir()
+    for f in Path(d).glob("*.pem"):  # what macOS temp cleanup did on 2026-11-10/11
+        f.unlink()
+    assert list(Path(consumer.trust_store_dir()).glob("*.pem"))  # rebuilt on the next build_service()
     import shutil
     shutil.rmtree(d)
+    assert list(Path(consumer.trust_store_dir()).glob("*.pem"))
 
 
 # ------------------------------------------------------------------- codec
