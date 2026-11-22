@@ -1,0 +1,34 @@
+{
+ "month": "2026-09",
+ "approved": "2026-11-22 Sean",
+ "skips": {
+  "LGB": [
+   "2026-09-16"
+  ],
+  "ORF": [
+   "2026-09-22"
+  ]
+ },
+ "evidence": {
+  "LGB": {
+   "last_before_utc": "2026-09-15T18:53Z",
+   "next_after_note": "about 36h later",
+   "sha256_first_try": "31239ed967d947522935d340eb7dc6e2f429ec1528d49c070a7961c3a6cbf51e",
+   "sha256_redownload": "31239ed967d947522935d340eb7dc6e2f429ec1528d49c070a7961c3a6cbf51e",
+   "cmp_identical": true
+  },
+  "ORF": {
+   "last_before_utc": "2026-09-21T22:06Z",
+   "next_after_note": "not recorded",
+   "sha256_first_try": "fcb0ad8038186b1689d6d748cef61651776510e530996597946713e908a40102",
+   "sha256_redownload": "fcb0ad8038186b1689d6d748cef61651776510e530996597946713e908a40102",
+   "cmp_identical": true
+  }
+ },
+ "metar_origin_coverage": {
+  "3h": 0.892,
+  "1h": 0.892,
+  "threshold": 0.85,
+  "validation": 0.895
+ }
+}

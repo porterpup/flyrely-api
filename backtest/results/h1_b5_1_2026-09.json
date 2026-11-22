@@ -1,0 +1,811 @@
+{
+  "protocol": "backtest/PROTOCOL_B5_1_HOLDOUT.md",
+  "holdout_month": "2026-09",
+  "force_rerun": null,
+  "code": {
+    "commit": "accf2cf48443b100fe7b1f30673f3d5a0f110f02",
+    "dirty": true
+  },
+  "manifest_sha256": "d028e7e6de8c738029b9215e0dd351c3b231461f153b7e4f295eedab122b70d6",
+  "models": {
+    "booking": {
+      "file": "booking.joblib",
+      "sha256": "ff8686c6893f12960e81acb650b02d003708ea1ceec7d5a47d8f67f234d909f9",
+      "n_features": 20
+    },
+    "1d_base": {
+      "file": "1d_base.joblib",
+      "sha256": "9cc0e3e1f20b7ec729eded2f59b60667c06090b80c4dc2126bb9c8f857fa8a0c",
+      "n_features": 45
+    },
+    "1d_B": {
+      "file": "1d_B.joblib",
+      "sha256": "cb33c4bca6ab6f20ca87fe96e000a33801cdde635756963f6c8a22723d6248a8",
+      "n_features": 53
+    },
+    "3h_base": {
+      "file": "3h_base.joblib",
+      "sha256": "40308b9b841a975fb9183dcd929b2fecb569119269e1010be4c1f5efd84d7ca3",
+      "n_features": 81
+    },
+    "3h_A": {
+      "file": "3h_A.joblib",
+      "sha256": "258693bdaa22b2b8a9c73f24339f6865520387f21b8cade6c652690e6b0a3b7a",
+      "n_features": 105
+    },
+    "3h_B": {
+      "file": "3h_B.joblib",
+      "sha256": "642456026da1f02aa625282b6cc77b37c95cd4229c7d4bfbb35d53c6cc356853",
+      "n_features": 89
+    },
+    "3h_AB": {
+      "file": "3h_AB.joblib",
+      "sha256": "d0766941530b4b8d5ba32a9c1418c938b7ec7a7b6de56873394e28ef10500b2b",
+      "n_features": 113
+    },
+    "1h_base": {
+      "file": "1h_base.joblib",
+      "sha256": "4ea5f47d39cccd9137e8b423b885fd1df26ce3e861725a94ee3bba7d3d97f711",
+      "n_features": 81
+    },
+    "1h_A": {
+      "file": "1h_A.joblib",
+      "sha256": "6279ebc292e28b7f50cf7010c90737fc1a4e83830991df97750dc43573c8a6de",
+      "n_features": 105
+    },
+    "1h_B": {
+      "file": "1h_B.joblib",
+      "sha256": "8c7624916b4970cf7357a36e0db6f2c70a6cf2be793c45543860f339c9bb6c33",
+      "n_features": 89
+    },
+    "1h_AB": {
+      "file": "1h_AB.joblib",
+      "sha256": "668076a9edb64f2a48fc5251bfa096bba3dd4cc687fd0ba6bf3f4dda3ad019f2",
+      "n_features": 113
+    }
+  },
+  "windows": {
+    "rates_12m_before": [
+      "2025-09",
+      "2026-08"
+    ],
+    "rates_b5_1_window": [
+      "2025-01",
+      "2025-12"
+    ]
+  },
+  "coverage": {
+    "metar_airports": 100,
+    "faa_airports": 100,
+    "faa_advisories_by_kind_status": {
+      "GDP/active": 5317,
+      "GDP/cancel": 4019,
+      "GDP/proposed": 3434,
+      "GS/active": 11066,
+      "GS/cancel": 4408,
+      "GS/proposed": 4
+    },
+    "eval_flights": 630177,
+    "eval_flown": 624486,
+    "flight_dates": 30
+  },
+  "ece_tolerance": 0.005,
+  "booking": {
+    "auc_delayed": 0.6874,
+    "brier_delayed": 0.1607,
+    "ece": 0.0104,
+    "max_decile_gap": 0.0201,
+    "auc_disrupted": 0.6831,
+    "deciles": [
+      {
+        "decile": 1,
+        "n": 62449,
+        "predicted": 0.0699,
+        "observed": 0.0662
+      },
+      {
+        "decile": 2,
+        "n": 62449,
+        "predicted": 0.1075,
+        "observed": 0.0987
+      },
+      {
+        "decile": 3,
+        "n": 62449,
+        "predicted": 0.1401,
+        "observed": 0.1258
+      },
+      {
+        "decile": 4,
+        "n": 62449,
+        "predicted": 0.1726,
+        "observed": 0.1577
+      },
+      {
+        "decile": 5,
+        "n": 62449,
+        "predicted": 0.2066,
+        "observed": 0.1916
+      },
+      {
+        "decile": 6,
+        "n": 62449,
+        "predicted": 0.2381,
+        "observed": 0.2301
+      },
+      {
+        "decile": 7,
+        "n": 62448,
+        "predicted": 0.2688,
+        "observed": 0.2646
+      },
+      {
+        "decile": 8,
+        "n": 62448,
+        "predicted": 0.3018,
+        "observed": 0.3042
+      },
+      {
+        "decile": 9,
+        "n": 62448,
+        "predicted": 0.3418,
+        "observed": 0.3619
+      },
+      {
+        "decile": 10,
+        "n": 62448,
+        "predicted": 0.4235,
+        "observed": 0.4358
+      }
+    ],
+    "monthly_auc": {
+      "2026-09": 0.6874
+    }
+  },
+  "1d": {
+    "n_features": {
+      "base": 45,
+      "B": 53
+    },
+    "new_feature_coverage": {
+      "B": {
+        "origin_covered": 0.8926,
+        "both_ends_covered": 0.7907
+      }
+    },
+    "faa_flagged_share_eval": {
+      "faa_o_gs_now": 0.01694,
+      "faa_o_gdp_now": 0.04917,
+      "faa_o_gdp_prop": 0.0,
+      "faa_o_gdp_cover": 0.0,
+      "faa_d_gs_now": 0.01567,
+      "faa_d_gdp_now": 0.04682,
+      "faa_d_gdp_prop": 0.0,
+      "faa_d_gdp_cover": 0.0
+    },
+    "arms": {
+      "base": {
+        "auc_delayed": 0.7106,
+        "brier_delayed": 0.15695,
+        "ece": 0.0205,
+        "max_decile_gap": 0.0282,
+        "auc_disrupted": 0.7083,
+        "monthly_auc": {
+          "2026-09": 0.7106
+        }
+      },
+      "B": {
+        "auc_delayed": 0.7141,
+        "brier_delayed": 0.15646,
+        "ece": 0.0218,
+        "max_decile_gap": 0.0382,
+        "auc_disrupted": 0.7117,
+        "monthly_auc": {
+          "2026-09": 0.7141
+        }
+      }
+    },
+    "vs_base": {
+      "B": {
+        "diff": -0.000481,
+        "ci95": [
+          -0.000979,
+          2.2e-05
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.001084,
+          "wk2 09-08..09-14": -0.000148,
+          "wk3 09-15..09-21": -0.000693,
+          "wk4 09-22..09-28": -0.00022,
+          "wk5 09-29..09-30": 0.000273
+        },
+        "auc_change": 0.0035,
+        "ece_with": 0.0218,
+        "ece_base": 0.0205,
+        "decision": {
+          "brier_ci_below_zero": false,
+          "ece_not_worse": true,
+          "adopt": false
+        },
+        "outcome": "not_confirmed"
+      }
+    },
+    "vs_booking": {
+      "base": {
+        "diff": -0.003752,
+        "ci95": [
+          -0.006004,
+          -0.001499
+        ]
+      },
+      "B": {
+        "diff": -0.004233,
+        "ci95": [
+          -0.006535,
+          -0.001866
+        ]
+      }
+    },
+    "verdict": {
+      "B": false
+    },
+    "outcome": {
+      "B": "not_confirmed"
+    },
+    "sensitivity_b5_1_rate_window": {
+      "arms": {
+        "base": {
+          "auc_delayed": 0.7015,
+          "brier_delayed": 0.15805,
+          "ece": 0.0107
+        },
+        "B": {
+          "auc_delayed": 0.7058,
+          "brier_delayed": 0.1574,
+          "ece": 0.0106
+        }
+      },
+      "vs_base": {
+        "B": {
+          "diff": -0.000657,
+          "ci95": [
+            -0.001095,
+            -0.000209
+          ],
+          "ece_with": 0.0106,
+          "ece_base": 0.0107,
+          "outcome": "confirmed"
+        }
+      }
+    }
+  },
+  "3h": {
+    "n_features": {
+      "base": 81,
+      "A": 105,
+      "B": 89,
+      "AB": 113
+    },
+    "new_feature_coverage": {
+      "A": {
+        "origin_covered": 0.8921,
+        "both_ends_covered": 0.7897
+      },
+      "B": {
+        "origin_covered": 0.8926,
+        "both_ends_covered": 0.7907
+      }
+    },
+    "faa_flagged_share_eval": {
+      "faa_o_gs_now": 0.0137,
+      "faa_o_gdp_now": 0.04204,
+      "faa_o_gdp_prop": 0.00202,
+      "faa_o_gdp_cover": 0.0358,
+      "faa_d_gs_now": 0.01089,
+      "faa_d_gdp_now": 0.03671,
+      "faa_d_gdp_prop": 0.00159,
+      "faa_d_gdp_cover": 0.01761
+    },
+    "arms": {
+      "base": {
+        "auc_delayed": 0.821,
+        "brier_delayed": 0.11815,
+        "ece": 0.0209,
+        "max_decile_gap": 0.0432,
+        "auc_disrupted": 0.8197,
+        "monthly_auc": {
+          "2026-09": 0.821
+        }
+      },
+      "A": {
+        "auc_delayed": 0.8226,
+        "brier_delayed": 0.11788,
+        "ece": 0.0182,
+        "max_decile_gap": 0.0331,
+        "auc_disrupted": 0.8214,
+        "monthly_auc": {
+          "2026-09": 0.8226
+        }
+      },
+      "B": {
+        "auc_delayed": 0.83,
+        "brier_delayed": 0.11461,
+        "ece": 0.0191,
+        "max_decile_gap": 0.0401,
+        "auc_disrupted": 0.8289,
+        "monthly_auc": {
+          "2026-09": 0.83
+        }
+      },
+      "AB": {
+        "auc_delayed": 0.8305,
+        "brier_delayed": 0.11476,
+        "ece": 0.0226,
+        "max_decile_gap": 0.0453,
+        "auc_disrupted": 0.8294,
+        "monthly_auc": {
+          "2026-09": 0.8305
+        }
+      }
+    },
+    "vs_base": {
+      "A": {
+        "diff": -0.000268,
+        "ci95": [
+          -0.000659,
+          0.000174
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.000659,
+          "wk2 09-08..09-14": -0.000403,
+          "wk3 09-15..09-21": -0.000225,
+          "wk4 09-22..09-28": 0.000231,
+          "wk5 09-29..09-30": -0.000388
+        },
+        "auc_change": 0.0016,
+        "ece_with": 0.0182,
+        "ece_base": 0.0209,
+        "decision": {
+          "brier_ci_below_zero": false,
+          "ece_not_worse": true,
+          "adopt": false
+        },
+        "outcome": "not_confirmed"
+      },
+      "B": {
+        "diff": -0.003539,
+        "ci95": [
+          -0.004236,
+          -0.002878
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.003048,
+          "wk2 09-08..09-14": -0.002299,
+          "wk3 09-15..09-21": -0.004422,
+          "wk4 09-22..09-28": -0.004735,
+          "wk5 09-29..09-30": -0.002175
+        },
+        "auc_change": 0.009,
+        "ece_with": 0.0191,
+        "ece_base": 0.0209,
+        "decision": {
+          "brier_ci_below_zero": true,
+          "ece_not_worse": true,
+          "adopt": true
+        },
+        "outcome": "confirmed"
+      },
+      "AB": {
+        "diff": -0.00339,
+        "ci95": [
+          -0.004104,
+          -0.002741
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.003068,
+          "wk2 09-08..09-14": -0.002419,
+          "wk3 09-15..09-21": -0.004293,
+          "wk4 09-22..09-28": -0.004198,
+          "wk5 09-29..09-30": -0.001807
+        },
+        "auc_change": 0.0095,
+        "ece_with": 0.0226,
+        "ece_base": 0.0209,
+        "decision": {
+          "brier_ci_below_zero": true,
+          "ece_not_worse": true,
+          "adopt": true
+        },
+        "outcome": "confirmed"
+      }
+    },
+    "vs_booking": {
+      "base": {
+        "diff": -0.042549,
+        "ci95": [
+          -0.047044,
+          -0.038131
+        ]
+      },
+      "A": {
+        "diff": -0.042818,
+        "ci95": [
+          -0.04726,
+          -0.038655
+        ]
+      },
+      "B": {
+        "diff": -0.046088,
+        "ci95": [
+          -0.050924,
+          -0.041475
+        ]
+      },
+      "AB": {
+        "diff": -0.04594,
+        "ci95": [
+          -0.050746,
+          -0.041292
+        ]
+      }
+    },
+    "verdict": {
+      "A": false,
+      "B": true
+    },
+    "outcome": {
+      "A": "not_confirmed",
+      "B": "confirmed"
+    },
+    "sensitivity_b5_1_rate_window": {
+      "arms": {
+        "base": {
+          "auc_delayed": 0.818,
+          "brier_delayed": 0.11845,
+          "ece": 0.0051
+        },
+        "A": {
+          "auc_delayed": 0.8196,
+          "brier_delayed": 0.11828,
+          "ece": 0.0033
+        },
+        "B": {
+          "auc_delayed": 0.828,
+          "brier_delayed": 0.11475,
+          "ece": 0.0075
+        },
+        "AB": {
+          "auc_delayed": 0.8283,
+          "brier_delayed": 0.11484,
+          "ece": 0.0072
+        }
+      },
+      "vs_base": {
+        "A": {
+          "diff": -0.000165,
+          "ci95": [
+            -0.000554,
+            0.000274
+          ],
+          "ece_with": 0.0033,
+          "ece_base": 0.0051,
+          "outcome": "not_confirmed"
+        },
+        "B": {
+          "diff": -0.003695,
+          "ci95": [
+            -0.004536,
+            -0.002928
+          ],
+          "ece_with": 0.0075,
+          "ece_base": 0.0051,
+          "outcome": "confirmed"
+        },
+        "AB": {
+          "diff": -0.003612,
+          "ci95": [
+            -0.004476,
+            -0.002849
+          ],
+          "ece_with": 0.0072,
+          "ece_base": 0.0051,
+          "outcome": "confirmed"
+        }
+      }
+    }
+  },
+  "1h": {
+    "n_features": {
+      "base": 81,
+      "A": 105,
+      "B": 89,
+      "AB": 113
+    },
+    "new_feature_coverage": {
+      "A": {
+        "origin_covered": 0.8921,
+        "both_ends_covered": 0.7897
+      },
+      "B": {
+        "origin_covered": 0.8926,
+        "both_ends_covered": 0.7907
+      }
+    },
+    "faa_flagged_share_eval": {
+      "faa_o_gs_now": 0.01633,
+      "faa_o_gdp_now": 0.04777,
+      "faa_o_gdp_prop": 0.00205,
+      "faa_o_gdp_cover": 0.046,
+      "faa_d_gs_now": 0.01388,
+      "faa_d_gdp_now": 0.04408,
+      "faa_d_gdp_prop": 0.00188,
+      "faa_d_gdp_cover": 0.03291
+    },
+    "arms": {
+      "base": {
+        "auc_delayed": 0.8555,
+        "brier_delayed": 0.10179,
+        "ece": 0.0109,
+        "max_decile_gap": 0.019,
+        "auc_disrupted": 0.8545,
+        "monthly_auc": {
+          "2026-09": 0.8555
+        }
+      },
+      "A": {
+        "auc_delayed": 0.857,
+        "brier_delayed": 0.10159,
+        "ece": 0.0127,
+        "max_decile_gap": 0.0282,
+        "auc_disrupted": 0.8559,
+        "monthly_auc": {
+          "2026-09": 0.857
+        }
+      },
+      "B": {
+        "auc_delayed": 0.8659,
+        "brier_delayed": 0.09809,
+        "ece": 0.0136,
+        "max_decile_gap": 0.0279,
+        "auc_disrupted": 0.8648,
+        "monthly_auc": {
+          "2026-09": 0.8659
+        }
+      },
+      "AB": {
+        "auc_delayed": 0.8669,
+        "brier_delayed": 0.09779,
+        "ece": 0.0141,
+        "max_decile_gap": 0.0286,
+        "auc_disrupted": 0.8659,
+        "monthly_auc": {
+          "2026-09": 0.8669
+        }
+      }
+    },
+    "vs_base": {
+      "A": {
+        "diff": -0.000201,
+        "ci95": [
+          -0.000558,
+          0.000198
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.000793,
+          "wk2 09-08..09-14": -0.000503,
+          "wk3 09-15..09-21": -0.000416,
+          "wk4 09-22..09-28": 0.000735,
+          "wk5 09-29..09-30": 0.000339
+        },
+        "auc_change": 0.0015,
+        "ece_with": 0.0127,
+        "ece_base": 0.0109,
+        "decision": {
+          "brier_ci_below_zero": false,
+          "ece_not_worse": true,
+          "adopt": false
+        },
+        "outcome": "not_confirmed"
+      },
+      "B": {
+        "diff": -0.003698,
+        "ci95": [
+          -0.004472,
+          -0.002883
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.003559,
+          "wk2 09-08..09-14": -0.00206,
+          "wk3 09-15..09-21": -0.005653,
+          "wk4 09-22..09-28": -0.004016,
+          "wk5 09-29..09-30": -0.001841
+        },
+        "auc_change": 0.0104,
+        "ece_with": 0.0136,
+        "ece_base": 0.0109,
+        "decision": {
+          "brier_ci_below_zero": true,
+          "ece_not_worse": true,
+          "adopt": true
+        },
+        "outcome": "confirmed"
+      },
+      "AB": {
+        "diff": -0.003995,
+        "ci95": [
+          -0.004811,
+          -0.003094
+        ],
+        "weeks": {
+          "wk1 09-01..09-07": -0.004175,
+          "wk2 09-08..09-14": -0.002423,
+          "wk3 09-15..09-21": -0.005989,
+          "wk4 09-22..09-28": -0.003937,
+          "wk5 09-29..09-30": -0.002
+        },
+        "auc_change": 0.0114,
+        "ece_with": 0.0141,
+        "ece_base": 0.0109,
+        "decision": {
+          "brier_ci_below_zero": true,
+          "ece_not_worse": true,
+          "adopt": true
+        },
+        "outcome": "confirmed"
+      }
+    },
+    "vs_booking": {
+      "base": {
+        "diff": -0.058911,
+        "ci95": [
+          -0.064229,
+          -0.053726
+        ]
+      },
+      "A": {
+        "diff": -0.059112,
+        "ci95": [
+          -0.064415,
+          -0.053726
+        ]
+      },
+      "B": {
+        "diff": -0.062609,
+        "ci95": [
+          -0.068327,
+          -0.056884
+        ]
+      },
+      "AB": {
+        "diff": -0.062906,
+        "ci95": [
+          -0.068611,
+          -0.057181
+        ]
+      }
+    },
+    "verdict": {
+      "A": false,
+      "B": true
+    },
+    "outcome": {
+      "A": "not_confirmed",
+      "B": "confirmed"
+    },
+    "sensitivity_b5_1_rate_window": {
+      "arms": {
+        "base": {
+          "auc_delayed": 0.854,
+          "brier_delayed": 0.10192,
+          "ece": 0.0029
+        },
+        "A": {
+          "auc_delayed": 0.8554,
+          "brier_delayed": 0.10171,
+          "ece": 0.004
+        },
+        "B": {
+          "auc_delayed": 0.8654,
+          "brier_delayed": 0.09784,
+          "ece": 0.007
+        },
+        "AB": {
+          "auc_delayed": 0.8664,
+          "brier_delayed": 0.09761,
+          "ece": 0.0076
+        }
+      },
+      "vs_base": {
+        "A": {
+          "diff": -0.000207,
+          "ci95": [
+            -0.000592,
+            0.000186
+          ],
+          "ece_with": 0.004,
+          "ece_base": 0.0029,
+          "outcome": "not_confirmed"
+        },
+        "B": {
+          "diff": -0.004073,
+          "ci95": [
+            -0.004927,
+            -0.003177
+          ],
+          "ece_with": 0.007,
+          "ece_base": 0.0029,
+          "outcome": "confirmed"
+        },
+        "AB": {
+          "diff": -0.004308,
+          "ci95": [
+            -0.00518,
+            -0.003341
+          ],
+          "ece_with": 0.0076,
+          "ece_base": 0.0029,
+          "outcome": "confirmed"
+        }
+      }
+    }
+  },
+  "gated": {
+    "H1-B-1d": {
+      "brier_diff": -0.000481,
+      "ci95": [
+        -0.000979,
+        2.2e-05
+      ],
+      "ece_with": 0.0218,
+      "ece_base": 0.0205,
+      "outcome": "not_confirmed"
+    },
+    "H1-A-3h": {
+      "brier_diff": -0.000268,
+      "ci95": [
+        -0.000659,
+        0.000174
+      ],
+      "ece_with": 0.0182,
+      "ece_base": 0.0209,
+      "outcome": "not_confirmed"
+    },
+    "H1-B-3h": {
+      "brier_diff": -0.003539,
+      "ci95": [
+        -0.004236,
+        -0.002878
+      ],
+      "ece_with": 0.0191,
+      "ece_base": 0.0209,
+      "outcome": "confirmed"
+    },
+    "H1-A-1h": {
+      "brier_diff": -0.000201,
+      "ci95": [
+        -0.000558,
+        0.000198
+      ],
+      "ece_with": 0.0127,
+      "ece_base": 0.0109,
+      "outcome": "not_confirmed"
+    },
+    "H1-B-1h": {
+      "brier_diff": -0.003698,
+      "ci95": [
+        -0.004472,
+        -0.002883
+      ],
+      "ece_with": 0.0136,
+      "ece_base": 0.0109,
+      "outcome": "confirmed"
+    }
+  },
+  "confirmed_horizons": {
+    "A": [],
+    "B": [
+      "3h",
+      "1h"
+    ]
+  }
+}
