@@ -1,0 +1,21 @@
+[
+  {
+    "started_utc": "2026-11-22T22:05:08Z",
+    "output": "h1_b5_1_2026-09.json",
+    "code_commit": "accf2cf48443b100fe7b1f30673f3d5a0f110f02",
+    "reason": null,
+    "models_sha256": {
+      "booking": "ff8686c6893f12960e81acb650b02d003708ea1ceec7d5a47d8f67f234d909f9",
+      "1d_base": "9cc0e3e1f20b7ec729eded2f59b60667c06090b80c4dc2126bb9c8f857fa8a0c",
+      "1d_B": "cb33c4bca6ab6f20ca87fe96e000a33801cdde635756963f6c8a22723d6248a8",
+      "3h_base": "40308b9b841a975fb9183dcd929b2fecb569119269e1010be4c1f5efd84d7ca3",
+      "3h_A": "258693bdaa22b2b8a9c73f24339f6865520387f21b8cade6c652690e6b0a3b7a",
+      "3h_B": "642456026da1f02aa625282b6cc77b37c95cd4229c7d4bfbb35d53c6cc356853",
+      "3h_AB": "d0766941530b4b8d5ba32a9c1418c938b7ec7a7b6de56873394e28ef10500b2b",
+      "1h_base": "4ea5f47d39cccd9137e8b423b885fd1df26ce3e861725a94ee3bba7d3d97f711",
+      "1h_A": "6279ebc292e28b7f50cf7010c90737fc1a4e83830991df97750dc43573c8a6de",
+      "1h_B": "8c7624916b4970cf7357a36e0db6f2c70a6cf2be793c45543860f339c9bb6c33",
+      "1h_AB": "668076a9edb64f2a48fc5251bfa096bba3dd4cc687fd0ba6bf3f4dda3ad019f2"
+    }
+  }
+]
