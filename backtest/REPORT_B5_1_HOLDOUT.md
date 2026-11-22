@@ -21,18 +21,18 @@
 
 All CIs are 95% day-block bootstraps. `confirmed_horizons` = A: none; B: 3h, 1h.
 
-- **No test is contradicted:** every point estimate is below 0, and no ECE condition fails for a test whose CI clears 0.
+- **No test is contradicted:** every point estimate is below 0, and no ECE condition fails.
 - **This matches the protocol's own forecast:** FAA at T-3h and T-1h clearly confirmed, and the other three tests "only just" at validation effect size.
-- **FAA got stronger on the holdout:** its improvement at T-3h and T-1h is about 1.6× the validation effect. The weekly FAA Brier differences are below 0 in all 5 weeks at both horizons. At T-1d, week 5 (09-29..30) is +0.000273.
+- **FAA got stronger on the holdout:** its improvement is about 1.6× the validation effect at T-3h and 1.5× at T-1h. The weekly FAA Brier differences are below 0 in all 5 weeks at both horizons. At T-1d, week 5 (09-29..30) is +0.000273.
 
 ## What this means for the product
 
 These rules come from protocol section 4; no new policy is added here.
 
-- **FAA ground-stop / GDP features are served at T-3h and T-1h.**
-- **FAA at T-1d is not served.** The base model is served at T-1d, and it still beats the booking model on this month: Brier diff -0.003752 [-0.006004, -0.001499].
+- **FAA ground-stop / GDP features are confirmed at T-3h and T-1h**, so they may be served at those horizons through roadmap P2–P4 (the P2 refit, P3 shadow mode, and the P4 go-live rule).
+- **FAA at T-1d is not served.** For context only (non-gating), the T-1d base model still beats the booking model on September: Brier diff -0.003752 [-0.006004, -0.001499].
 - **METAR is not served at T-3h or T-1h.** As the protocol puts it, "we will not depend on live METAR yet". METAR was never tested at T-1d.
-- **Not-confirmed results are dropped for serving and never re-tested on September.** The October second check (approved 2026-11-10) can only demote the FAA T-3h/T-1h results. It cannot revive METAR or FAA at T-1d; that would need a new protocol on the 2027 holdout.
+- **Not-confirmed results are dropped for serving and never re-tested on September.** The October second check (approved by Sean on 2026-11-10 per `HANDOFF.md`; protocol section 7 here still reads "pending") can only demote the FAA T-3h/T-1h results. It cannot revive METAR or FAA at T-1d; that would need a new protocol on the 2027 holdout.
 
 ## Every arm
 
@@ -79,7 +79,9 @@ The final run passed all 13 checks:
 - **Weather:** every airport and hour is present.
 - **Models:** the frozen models match the manifest.
 
-Coverage on scored flights: METAR origin 89.21%, FAA origin 89.26%, both ends about 79%. FAA flag shares are close to validation (T-1d origin: GDP in force 4.9%, ground stop 1.7%).
+Coverage on scored flights: METAR origin 89.21%, FAA origin 89.26%, both ends about 79%. FAA flag shares at the T-1d origin: GDP in force 4.9% (validation 3.3%, so about 1.5× higher, against the protocol's guess that September has fewer programs) and ground stop 1.7% (validation 1.5%).
+
+The BTS row counts, the 30 GS/GDP days and the FAA build times come from the stage 2a console output and file timestamps. They are not in a committed file.
 
 Two first-try failures were fixed before any score, as section 5 allows:
 
