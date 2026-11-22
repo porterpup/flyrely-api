@@ -183,6 +183,7 @@ stops. None of them uses delay outcomes:
   required columns present, no flight date outside September.
 - METAR: all 100 airports with at least one report per day on 30 of 30 days; origin coverage of holdout flights at least
   85% (validation: 89.5%).
+  (see Amendment 1)
 - FAA: 31 of 31 list pages present and parseable; at least one GS/GDP advisory on at least 25 days.
 - Weather: archived forecasts for every B5.1 weather airport and every hour in range.
 - The frozen model files match `h1_models_manifest.json`.
@@ -283,3 +284,35 @@ confirmation uses one new month once, following the same pattern as this protoco
 - Whether IEM, the FAA advisory database and Open-Meteo Previous Runs have complete September 2026 data. Stage 2a checks
   this before scoring.
 - The power estimate in section 4 assumes the September day-to-day variance matches validation.
+
+## Amendment 1 (2026-11-22): documented METAR skip
+
+Approved by Sean on 2026-11-22. Made before any score: no `h1_b5_1_2026-09.json` and no attempts file exists.
+
+**Trigger.** Stage 2a failed only on: `metar: every airport has a report on every day: 2 short: {'LGB': '29/30 days',
+'ORF': '29/30 days'}`.
+
+**Evidence.**
+- LGB has no METAR on 2026-09-16. The last report before is 2026-09-15 18:53 UTC; the next is about 36 hours later.
+- ORF has no METAR on 2026-09-22. The last report before is 2026-09-21 22:06 UTC.
+- The original files (`data/holdout/2026-09/metar_first_try/`) and the re-downloads (`data/holdout/2026-09/metar/`) are
+  byte-identical (`cmp`), so the gaps are in the source, not the download. SHA-256 values are in
+  `backtest/results/h1_metar_skips_2026-09.json`.
+- METAR origin coverage of holdout flights is 89.2% at both 3h and 1h (threshold 85%, validation 89.5%).
+
+**The skip.** Exactly LGB 2026-09-16 and ORF 2026-09-22. All other airports keep 30 of 30 days. A listed day that has data
+fails the check.
+
+**Unchanged.** Origin coverage at least 85%, all other stage 2a checks, the frozen models, features, the CI rule, the ECE
+tolerance of 0.005, the five gated tests, and score-once.
+
+**Procedure.**
+- The amended check runs at commit 2 of this amendment. The pass marker records that commit and the skips.
+- `backtest/experiments_b5.py` is then restored byte-identical to 89be2a4 before the score.
+- `--stage check` must NOT be re-run after the restore. If it is, `git restore` the committed marker.
+
+**FAA note.** The FAA check first failed with 8 days because the build ran before the list download had finished. A
+rebuild gave 30 days and passes.
+
+**Disclosure.** The gap timestamps above were read from the September METAR files before stage 3. This was METAR only; no
+delay outcomes were read.
