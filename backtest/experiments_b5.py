@@ -281,8 +281,6 @@ def verify_models(manifest: dict, models_dir: Path = None) -> None:
 
 TREE_PATHS = ["flyrely_features", "backtest/runup.py", "backtest/backtest.py", "backtest/experiments_b5.py",
               "backtest/holdout.py", "backtest/fetch_faa_adv.py"]       # code that must equal the freeze commit's
-# Protocol amendment 1 (2026-11-22): documented METAR gaps in the source data. Temporary; reverted before the score.
-METAR_DAY_SKIPS = {"2026-09": {"LGB": {"2026-09-16"}, "ORF": {"2026-09-22"}}}
 
 
 def _git(*args):
@@ -632,24 +630,16 @@ def stage_check(month: str, models_dir: Path = None, manifest_path: Path = None)
 
     # METAR files (all frozen airports, every day of the month)
     days = {str(x.date()) for x in pd.date_range(mfirst, mlast)}
-    short, stale = {}, []
-    skips = METAR_DAY_SKIPS.get(month, {})
-    frozen_metar = list(holdout.frozen_airports("metar"))
-    stale += [f"{a}: not a frozen airport" for a in skips if a not in frozen_metar]
-    for ap_ in frozen_metar:
+    short = {}
+    for ap_ in holdout.frozen_airports("metar"):
         mf = hd / "metar" / f"{ap_}_{month}.csv"
         if not mf.exists():
             short[ap_] = "no file"
             continue
         got = set(pd.read_csv(mf, usecols=["valid"], dtype=str)["valid"].dropna().str[:10]) & days
-        excused = skips.get(ap_, set())
-        stale += [f"{ap_} {d_}" for d_ in sorted(excused & got)]
-        if (days - got) - excused:
+        if got != days:
             short[ap_] = f"{len(got)}/{len(days)} days"
-    report("metar: every airport has a report on every day", not short,
-           f"{len(short)} short: {dict(list(short.items())[:5])}; documented skips: { {a: sorted(v) for a, v in skips.items()} }")
-    if skips:
-        report("metar: documented skips are exactly missing days", not stale, f"stale: {stale}")
+    report("metar: every airport has a report on every day", not short, f"{len(short)} short: {dict(list(short.items())[:5])}")
 
     # FAA list pages and programs
     lst_dir = holdout_out(month) / "list"
@@ -712,11 +702,7 @@ def stage_check(month: str, models_dir: Path = None, manifest_path: Path = None)
     if ok:
         mf = check_marker_path(month)
         mf.write_text(json.dumps({"month": month, "files": hash_holdout_files(month),
-                                  "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                  "code_commit": _git("rev-parse", "HEAD").stdout.strip(),
-                                  "tree_clean": not _git("status", "--porcelain", "--untracked-files=no").stdout.strip(),
-                                  "metar_day_skips": {a: sorted(v) for a, v in METAR_DAY_SKIPS.get(month, {}).items()}},
-                                 indent=1) + "\n")
+                                  "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=1) + "\n")
     elif check_marker_path(month).exists():
         check_marker_path(month).unlink()          # a failed check invalidates an earlier pass
     print("ALL CHECKS PASSED" if ok else "CHECKS FAILED: fix the data and repeat stage 2a (no score has been computed)")
