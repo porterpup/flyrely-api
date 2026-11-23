@@ -222,8 +222,8 @@ def test_holdout_lock_in_fetchers(monkeypatch):
     monkeypatch.delenv("FLYRELY_HOLDOUT_UNLOCK", raising=False)
     for mod in (ff, fetch_metar):
         with pytest.raises(SystemExit):
-            mod.check_holdout("2026-09-01")
-        mod.check_holdout("2026-08-31")
+            mod.check_holdout("2026-10-01")
+        mod.check_holdout("2026-09-30")
 
 
 def test_decision_rule_is_the_preregistered_one():
@@ -322,7 +322,7 @@ def test_zone_table_covers_non_dst_and_offshore_airports():
 
 def test_busiest_airports_ignores_holdout_months(tmp_path, monkeypatch):
     import fetch_metar
-    for ym, orig in (("2025-01", "ATL"), ("2026-08", "ATL"), ("2026-09", "ZZZ"), ("2026-10", "ZZZ")):
+    for ym, orig in (("2025-01", "ATL"), ("2026-09", "ATL"), ("2026-10", "ZZZ"), ("2026-11", "ZZZ")):
         pd.DataFrame({"Origin": [orig] * 5, "Dest": ["ORD"] * 5}).to_parquet(tmp_path / f"{ym}.parquet")
     monkeypatch.setattr(fetch_metar, "PARQUET", tmp_path)
     assert "ZZZ" not in fetch_metar.busiest_airports(10)
@@ -331,9 +331,9 @@ def test_busiest_airports_ignores_holdout_months(tmp_path, monkeypatch):
 
 def test_experiment_hard_fails_on_holdout_metar():
     import experiments_b5 as e
-    ok = metar.Metar(AIRPORTS, raw=raw_metar([{"station": "ATL", "valid": "2026-08-31 23:53", "vsby": "10"}]))
+    ok = metar.Metar(AIRPORTS, raw=raw_metar([{"station": "ATL", "valid": "2026-09-30 23:53", "vsby": "10"}]))
     e.check_metar_holdout(ok)
-    bad = metar.Metar(AIRPORTS, raw=raw_metar([{"station": "ATL", "valid": "2026-08-31 23:53", "vsby": "10"},
-                                                {"station": "XXX", "valid": "2026-09-01 00:00", "vsby": "10"}]))
+    bad = metar.Metar(AIRPORTS, raw=raw_metar([{"station": "ATL", "valid": "2026-09-30 23:53", "vsby": "10"},
+                                                {"station": "XXX", "valid": "2026-10-01 00:00", "vsby": "10"}]))
     with pytest.raises(RuntimeError):
         e.check_metar_holdout(bad)         # also catches an airport that is not modelled

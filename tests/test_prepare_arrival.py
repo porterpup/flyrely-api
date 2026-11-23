@@ -48,7 +48,7 @@ def test_arrival_columns_added_and_shared_columns_equal_prepare(tmp_path):
 
 def test_locked_month_zip_is_refused(tmp_path):
     with pytest.raises(SystemExit):
-        prepare_arrival.convert(_zip(tmp_path, 2026, 9), tmp_path / "arr")
+        prepare_arrival.convert(_zip(tmp_path, 2026, 10), tmp_path / "arr")
     assert not (tmp_path / "arr").exists()
 
 

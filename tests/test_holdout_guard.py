@@ -27,7 +27,7 @@ import holdout  # noqa: E402
 import prepare  # noqa: E402
 from flyrely_features import metar, weather  # noqa: E402
 
-MONTH = "2026-09"
+MONTH = "2026-10"
 UNLOCK = holdout.UNLOCK_VAR
 
 
@@ -57,19 +57,19 @@ def test_unlock_opens_only_the_named_month(monkeypatch):
     assert holdout.unlocked_month(MONTH, {}) is None                                   # nothing set
     assert holdout.unlocked_month(None, {UNLOCK: MONTH}) is None                       # env without the flag
     assert holdout.unlocked_month(MONTH, {UNLOCK: MONTH}) == MONTH                     # both, same month
-    assert holdout.unlocked_month(MONTH, {UNLOCK: "2026-10"}) is None                  # another month's unlock
-    assert holdout.unlocked_month("2026-10", {UNLOCK: MONTH}) is None                  # another month's flag
+    assert holdout.unlocked_month(MONTH, {UNLOCK: "2026-11"}) is None                  # another month's unlock
+    assert holdout.unlocked_month("2026-11", {UNLOCK: MONTH}) is None                  # another month's flag
     assert holdout.unlocked_month("2026-05", {UNLOCK: "2026-05"}) is None              # not a protected month
     monkeypatch.setenv(UNLOCK, MONTH)
     assert holdout.require_unlock(MONTH) == MONTH
-    for other in ("2026-10", "2026-11", "2027-01"):
+    for other in ("2026-11", "2026-12", "2027-01"):
         with pytest.raises(SystemExit):
             holdout.require_unlock(other)
 
 
 def test_only_the_allowlisted_month_can_be_unlocked(monkeypatch):
-    assert holdout.UNLOCKABLE == ("2026-09",)
-    for m in ("2026-10", "2026-11", "2027-01"):
+    assert holdout.UNLOCKABLE == ("2026-10",)
+    for m in ("2026-11", "2026-12", "2027-01"):
         assert holdout.unlocked_month(m, {UNLOCK: m}) is None          # named by both, still refused
         monkeypatch.setenv(UNLOCK, m)
         with pytest.raises(SystemExit, match="only"):
@@ -86,24 +86,36 @@ def test_old_unlock_value_one_is_refused(monkeypatch):
     with pytest.raises(SystemExit):
         holdout.require_unlock(MONTH)
     with pytest.raises(SystemExit):
-        holdout.check_end_date("2026-09-30")                                           # even without the flag
+        holdout.check_end_date("2026-10-30")                                           # even without the flag
 
 
 def test_garbage_months_are_rejected(monkeypatch):
-    for bad in ("2026-9", "2026-13", "garbage", "", "2026-09-01"):
+    for bad in ("2026-9", "2026-13", "garbage", "", "2026-10-01"):
         with pytest.raises(SystemExit):
             holdout.require_unlock(bad)
     with pytest.raises(SystemExit):
         holdout.unlocked_month(MONTH, {UNLOCK: "nine"})
 
 
-def test_locked_range_starts_at_september_2026():
-    assert holdout.LOCKED_FROM == "2026-09"
-    assert str(holdout.LAST_ALLOWED_DATE) == "2026-08-31"
-    assert holdout.is_locked_month("2026-09") and holdout.is_locked_month("2027-01")
-    assert not holdout.is_locked_month("2026-08")
-    assert holdout.is_locked_date("2026-09-01") and not holdout.is_locked_date("2026-08-31")
-    assert [str(d) for d in holdout.input_window("2026-09")] == ["2026-09-01", "2026-10-01"]
+def test_locked_range_starts_at_october_2026():
+    assert holdout.LOCKED_FROM == "2026-10"
+    assert str(holdout.LAST_ALLOWED_DATE) == "2026-09-30"
+    assert holdout.is_locked_month("2026-10") and holdout.is_locked_month("2027-01")
+    assert not holdout.is_locked_month("2026-09")
+    assert holdout.is_locked_date("2026-10-01") and not holdout.is_locked_date("2026-09-30")
+    assert [str(d) for d in holdout.input_window("2026-10")] == ["2026-10-01", "2026-11-01"]
+
+
+def test_september_2026_is_ordinary_data_after_the_lock_move():
+    """September was spent at H1 (protocol section 6). It is not protected and cannot be unlocked any more."""
+    assert not holdout.is_locked_month("2026-09") and not holdout.is_locked_date("2026-09-30")
+    assert "2026-09" not in holdout.UNLOCKABLE
+    assert holdout.unlocked_month("2026-09", {UNLOCK: "2026-09"}) is None
+    with pytest.raises(SystemExit, match="not a protected month"):
+        holdout.require_unlock("2026-09")
+    holdout.check_end_date("2026-09-30")                                               # fetchers accept it now
+    with pytest.raises(SystemExit):
+        holdout.check_end_date("2026-10-01")
 
 
 def test_sh_mirror_uses_the_same_locked_start():
@@ -113,20 +125,20 @@ def test_sh_mirror_uses_the_same_locked_start():
 
 # ---------------------------------------------------------------- every fetcher refuses without the flag
 
-def test_fetchers_refuse_september_without_the_flag(monkeypatch):
+def test_fetchers_refuse_october_without_the_flag(monkeypatch):
     for env in (None, MONTH, "1"):                    # even an unlock that names the month is useless without --holdout
         if env:
             monkeypatch.setenv(UNLOCK, env)
         for mod in (fetch_metar, fetch_weather, ff):
-            for end in ("2026-09-01", "2026-09-30", "2026-10-01", "2027-01-01"):
+            for end in ("2026-10-01", "2026-10-30", "2026-11-01", "2027-01-01"):
                 with pytest.raises(SystemExit):
                     mod.check_holdout(end)
-            mod.check_holdout("2026-08-31")
+            mod.check_holdout("2026-09-30")
         with pytest.raises(SystemExit):
-            fetch_metar.main(["--end", "2026-09-30"])
+            fetch_metar.main(["--end", "2026-10-30"])
         with pytest.raises(SystemExit):
-            fetch_weather.main(["--end", "2026-09-30"])
-        monkeypatch.setattr(sys, "argv", ["x", "lists", "--end", "2026-09-30"])
+            fetch_weather.main(["--end", "2026-10-30"])
+        monkeypatch.setattr(sys, "argv", ["x", "lists", "--end", "2026-10-30"])
         with pytest.raises(SystemExit):
             ff.main()
     monkeypatch.delenv(UNLOCK)
@@ -136,7 +148,7 @@ def test_holdout_flag_needs_the_matching_unlock(hroot, monkeypatch):
     for argv_main in (lambda: fetch_metar.main(["--holdout", MONTH]), lambda: fetch_weather.main(["--holdout", MONTH])):
         with pytest.raises(SystemExit):                                   # locked
             argv_main()
-        monkeypatch.setenv(UNLOCK, "2026-10")
+        monkeypatch.setenv(UNLOCK, "2026-11")
         with pytest.raises(SystemExit):                                   # another month's unlock
             argv_main()
         monkeypatch.delenv(UNLOCK)
@@ -149,16 +161,16 @@ def test_holdout_flag_needs_the_matching_unlock(hroot, monkeypatch):
 
 def test_holdout_refuses_october_and_november_dates(monkeypatch):
     monkeypatch.setenv(UNLOCK, MONTH)
-    holdout.check_end_date("2026-10-01", MONTH)                           # month plus one day is the window
-    for bad in ("2026-10-02", "2026-11-01", "2026-08-31"):
+    holdout.check_end_date("2026-11-01", MONTH)                           # month plus one day is the window
+    for bad in ("2026-11-02", "2026-12-01", "2026-09-30"):
         with pytest.raises(SystemExit):
             holdout.check_end_date(bad, MONTH)
     with pytest.raises(SystemExit):
-        fetch_metar.check_holdout("2026-11-05", MONTH)
+        fetch_metar.check_holdout("2026-12-05", MONTH)
     with pytest.raises(SystemExit):                                       # fetch_one re-checks every request
-        fetch_metar.fetch_one(None, "ATL", pd.Timestamp("2026-10-01").date(), pd.Timestamp("2026-10-02").date(),
+        fetch_metar.fetch_one(None, "ATL", pd.Timestamp("2026-11-01").date(), pd.Timestamp("2026-11-02").date(),
                               holdout_month=MONTH)
-    for argv in (["--holdout", MONTH, "--end", "2026-11-30"], ["--holdout", MONTH, "--airports", "ATL"]):
+    for argv in (["--holdout", MONTH, "--end", "2026-12-30"], ["--holdout", MONTH, "--airports", "ATL"]):
         with pytest.raises(SystemExit):
             fetch_metar.main(argv)
         with pytest.raises(SystemExit):
@@ -169,7 +181,7 @@ def test_holdout_refuses_october_and_november_dates(monkeypatch):
 
 class FakeResp:
     status_code = 200
-    text = "station,valid,vsby\nATL,2026-09-01 00:53,10\n"
+    text = "station,valid,vsby\nATL,2026-10-01 00:53,10\n"
 
     def raise_for_status(self):
         pass
@@ -207,11 +219,11 @@ def test_metar_holdout_writes_only_the_holdout_folder(hroot, tmp_path, monkeypat
     FakeClient.calls = []
     fetch_metar.main(["--holdout", MONTH])
     out = hroot / MONTH / "metar"
-    assert sorted(p.name for p in out.iterdir()) == ["ATL_2026-09.csv", "ORD_2026-09.csv"]     # the frozen list
+    assert sorted(p.name for p in out.iterdir()) == ["ATL_2026-10.csv", "ORD_2026-10.csv"]     # the frozen list
     assert not main_dir.exists()
     assert len(FakeClient.calls) == 2
     p = FakeClient.calls[0][1]
-    assert (p["year1"], p["month1"], p["day1"]) == (2026, 9, 1) and (p["month2"], p["day2"]) == (10, 2)
+    assert (p["year1"], p["month1"], p["day1"]) == (2026, 10, 1) and (p["month2"], p["day2"]) == (11, 2)
 
 
 def test_weather_holdout_writes_only_the_holdout_folder(hroot, tmp_path, monkeypatch):
@@ -233,12 +245,12 @@ def test_weather_holdout_writes_only_the_holdout_folder(hroot, tmp_path, monkeyp
     fetch_weather.main(["--holdout", MONTH])
     assert sorted(p.name for p in (hroot / MONTH / "weather").iterdir()) == ["ATL.parquet", "ORD.parquet", "SEA.parquet"]
     assert not main_dir.exists()
-    assert {(s, en) for _, s, en in seen} == {("2026-09-01", "2026-10-01")}
+    assert {(s, en) for _, s, en in seen} == {("2026-10-01", "2026-11-01")}
 
 
 def test_faa_holdout_lists_and_build_stay_in_the_holdout_folder(hroot, tmp_path, monkeypatch):
     main_dir = tmp_path / "main_faa"
-    page = ('<table><tr><td><a href="/adv/adv_otherdis?adv_date=09152026&advn=12">012 </a></td><td>ATL/ZTL</td>'
+    page = ('<table><tr><td><a href="/adv/adv_otherdis?adv_date=10152026&advn=12">012 </a></td><td>ATL/ZTL</td>'
             '<td>09/15/26</td><td>CDM GROUND STOP</td><td>09/15/26 22:12</td></tr></table>' + " " * 600)
     monkeypatch.setattr(ff, "OUT", main_dir)
     monkeypatch.setattr(ff, "get", lambda client, url, params=None, tries=6: page)
@@ -248,11 +260,11 @@ def test_faa_holdout_lists_and_build_stay_in_the_holdout_folder(hroot, tmp_path,
     monkeypatch.setattr(sys, "argv", ["x", "lists", "--holdout", MONTH])
     ff.main()
     pages = sorted(p.name for p in (hroot / MONTH / "faa_adv" / "list").iterdir())
-    assert pages[0] == "2026-09-01.html" and pages[-1] == "2026-10-01.html" and len(pages) == 31
+    assert pages[0] == "2026-10-01.html" and pages[-1] == "2026-11-01.html" and len(pages) == 32
     monkeypatch.setattr(sys, "argv", ["x", "build", "--holdout", MONTH])
     ff.main()
     prog = pd.read_parquet(hroot / MONTH / "faa_adv" / "programs.parquet")
-    assert len(prog) == 31 and set(prog["kind"]) == {"GS"}
+    assert len(prog) == 32 and set(prog["kind"]) == {"GS"}
     assert not main_dir.exists()                                          # nothing reached the main folder
     monkeypatch.setattr(sys, "argv", ["x", "details", "--holdout", MONTH])
     with pytest.raises(SystemExit) as err:
@@ -261,23 +273,23 @@ def test_faa_holdout_lists_and_build_stay_in_the_holdout_folder(hroot, tmp_path,
 
 
 def test_list_frame_never_merges_holdout_pages(hroot, tmp_path, monkeypatch):
-    page = ('<table><tr><td><a href="/adv/adv_otherdis?adv_date=09152026&advn=12">012 </a></td><td>ATL/ZTL</td>'
+    page = ('<table><tr><td><a href="/adv/adv_otherdis?adv_date=10152026&advn=12">012 </a></td><td>ATL/ZTL</td>'
             '<td>09/15/26</td><td>CDM GROUND STOP</td><td>09/15/26 22:12</td></tr></table>')
     main_dir = tmp_path / "main_faa"
     (main_dir / "list").mkdir(parents=True)
-    (main_dir / "list" / "2026-08-31.html").write_text(page)
-    (main_dir / "list" / "2026-09-15.html").write_text(page)             # a stray holdout page in the main folder
+    (main_dir / "list" / "2026-09-30.html").write_text(page)
+    (main_dir / "list" / "2026-10-15.html").write_text(page)             # a stray holdout page in the main folder
     monkeypatch.setattr(ff, "OUT", main_dir)
-    assert list(ff.list_frame()["list_date"]) == ["2026-08-31"]
+    assert list(ff.list_frame()["list_date"]) == ["2026-09-30"]
     hl = hroot / MONTH / "faa_adv" / "list"
     hl.mkdir(parents=True)
-    for d in ("2026-09-15", "2026-10-01", "2026-10-02"):
+    for d in ("2026-10-15", "2026-11-01", "2026-11-02"):
         (hl / f"{d}.html").write_text(page)
-    assert list(ff.list_frame(MONTH)["list_date"]) == ["2026-09-15", "2026-10-01"]   # only the month plus one day
+    assert list(ff.list_frame(MONTH)["list_date"]) == ["2026-10-15", "2026-11-01"]   # only the month plus one day
 
 
 def test_busiest_airports_ignore_holdout_files_in_both_fetchers(tmp_path, monkeypatch):
-    for ym, orig in (("2025-01", "ATL"), ("2026-08", "ATL"), ("2026-09", "ZZZ"), ("2026-10", "ZZZ"), ("2027-01", "ZZZ")):
+    for ym, orig in (("2025-01", "ATL"), ("2026-09", "ATL"), ("2026-10", "ZZZ"), ("2026-11", "ZZZ"), ("2027-01", "ZZZ")):
         pd.DataFrame({"Origin": [orig] * 5, "Dest": ["ORD"] * 5}).to_parquet(tmp_path / f"{ym}.parquet")
     for mod in (fetch_metar, fetch_weather):
         monkeypatch.setattr(mod, "PARQUET", tmp_path)
@@ -302,12 +314,12 @@ def test_prepare_holdout_converts_only_that_month_into_its_folder(hroot, monkeyp
     d = hroot / MONTH / "bts"
     d.mkdir(parents=True)
     bts_zip(d, MONTH)
-    bts_zip(d, "2026-10")                                               # a stray October zip is never converted
+    bts_zip(d, "2026-11")                                               # a stray November zip is never converted
     with pytest.raises(SystemExit):                                     # locked
         prepare.main(["--source", "marketing", "--holdout", MONTH])
     monkeypatch.setenv(UNLOCK, MONTH)
     prepare.main(["--source", "marketing", "--holdout", MONTH])
-    assert sorted(p.name for p in d.glob("*.parquet")) == ["2026-09.parquet"]
+    assert sorted(p.name for p in d.glob("*.parquet")) == ["2026-10.parquet"]
     with pytest.raises(SystemExit):
         prepare.main(["--holdout", MONTH])                              # reporting source has no holdout form
 
@@ -315,7 +327,7 @@ def test_prepare_holdout_converts_only_that_month_into_its_folder(hroot, monkeyp
 def test_prepare_holdout_refuses_october_rows(hroot, monkeypatch):
     d = hroot / MONTH / "bts"
     d.mkdir(parents=True)
-    bts_zip(d, MONTH, extra_dates=("2026-10-01",))
+    bts_zip(d, MONTH, extra_dates=("2026-11-01",))
     monkeypatch.setenv(UNLOCK, MONTH)
     with pytest.raises(RuntimeError, match="outside"):
         prepare.main(["--source", "marketing", "--holdout", MONTH])
@@ -325,14 +337,14 @@ def test_prepare_holdout_refuses_october_rows(hroot, monkeypatch):
 def test_prepare_without_the_flag_never_converts_a_holdout_zip(tmp_path, monkeypatch):
     src = tmp_path / "marketing"
     src.mkdir()
-    bts_zip(src, "2026-08")
+    bts_zip(src, "2026-09")
     bts_zip(src, MONTH)
     monkeypatch.setattr(prepare, "ROOT", tmp_path)
     monkeypatch.setenv(UNLOCK, MONTH)
     prepare.main(["--source", "marketing"])
-    assert [p.name for p in (tmp_path / "parquet_v2").glob("*.parquet")] == ["2026-08.parquet"]
+    assert [p.name for p in (tmp_path / "parquet_v2").glob("*.parquet")] == ["2026-09.parquet"]
     with pytest.raises(SystemExit):
-        prepare.convert(next(src.glob("*_2026_9.zip")), tmp_path / "parquet_v2", "marketing")
+        prepare.convert(next(src.glob("*_2026_10.zip")), tmp_path / "parquet_v2", "marketing")
 
 
 def month_frame(month: str, dates):
@@ -345,28 +357,28 @@ def month_frame(month: str, dates):
 def test_load_months_never_reads_a_holdout_month_from_the_main_folder(tmp_path, hroot, monkeypatch):
     main = tmp_path / "parquet_v2"
     main.mkdir()
-    month_frame("2026-08", ["2026-08-03"]).to_parquet(main / "2026-08.parquet")
-    month_frame(MONTH, ["2026-09-03"]).to_parquet(main / "2026-09.parquet")      # a stray file
+    month_frame("2026-09", ["2026-09-03"]).to_parquet(main / "2026-09.parquet")
+    month_frame(MONTH, ["2026-10-03"]).to_parquet(main / "2026-10.parquet")      # a stray file
     monkeypatch.setattr(bt, "PARQUET", main)
-    assert len(bt.load_months("2026-08", "2026-08")) == 1
+    assert len(bt.load_months("2026-09", "2026-09")) == 1
     with pytest.raises(RuntimeError, match="protected holdout"):
-        bt.load_months("2026-08", MONTH)
+        bt.load_months("2026-09", MONTH)
     hd = hroot / MONTH / "bts"
     hd.mkdir(parents=True)
-    month_frame(MONTH, ["2026-09-04"]).to_parquet(hd / "2026-09.parquet")
+    month_frame(MONTH, ["2026-10-04"]).to_parquet(hd / "2026-10.parquet")
     with pytest.raises(RuntimeError, match="not unlocked"):                    # right folder, but no unlock
-        bt.load_months("2026-08", MONTH, holdout_dir=hd)
-    monkeypatch.setenv(UNLOCK, "2026-10")
+        bt.load_months("2026-09", MONTH, holdout_dir=hd)
+    monkeypatch.setenv(UNLOCK, "2026-11")
     with pytest.raises(RuntimeError, match="not unlocked"):                    # another month's unlock
-        bt.load_months("2026-08", MONTH, holdout_dir=hd)
+        bt.load_months("2026-09", MONTH, holdout_dir=hd)
     monkeypatch.setenv(UNLOCK, MONTH)
     with pytest.raises(RuntimeError, match="protected holdout"):
-        bt.load_months("2026-08", MONTH, holdout_dir=tmp_path / "elsewhere" / "bts")   # wrong folder
-    df = bt.load_months("2026-08", MONTH, holdout_dir=hd)
-    assert list(df["ym"]) == ["2026-08", "2026-09"] and df["FlightDate"].iloc[-1] == pd.Timestamp("2026-09-04")
-    month_frame(MONTH, ["2026-09-04", "2026-10-01"]).to_parquet(hd / "2026-09.parquet")
+        bt.load_months("2026-09", MONTH, holdout_dir=tmp_path / "elsewhere" / "bts")   # wrong folder
+    df = bt.load_months("2026-09", MONTH, holdout_dir=hd)
+    assert list(df["ym"]) == ["2026-09", "2026-10"] and df["FlightDate"].iloc[-1] == pd.Timestamp("2026-10-04")
+    month_frame(MONTH, ["2026-10-04", "2026-11-01"]).to_parquet(hd / "2026-10.parquet")
     with pytest.raises(RuntimeError, match="outside"):
-        bt.load_months("2026-08", MONTH, holdout_dir=hd)
+        bt.load_months("2026-09", MONTH, holdout_dir=hd)
 
 
 def make_sh_tree(tmp_path: Path) -> Path:
@@ -375,7 +387,7 @@ def make_sh_tree(tmp_path: Path) -> Path:
     shutil.copy(ROOT / "backtest" / "fetch_bts.sh", tmp_path / "backtest" / "fetch_bts.sh")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    zp = bts_zip(tmp_path, "2026-09")
+    zp = bts_zip(tmp_path, "2026-10")
     curl = bin_dir / "curl"
     curl.write_text('#!/bin/sh\nwhile [ $# -gt 0 ]; do case $1 in -o) out=$2; shift;; http*) url=$1;; esac; shift; done\n'
                     f'echo "$url" >> "{tmp_path}/curl.log"\ncp "{zp}" "$out"\n')
@@ -399,14 +411,14 @@ def test_fetch_bts_sh_holdout_policy(shell, tmp_path):
     log = tmp_path / "curl.log"
     cases = [(("--holdout", MONTH), {}),                                    # locked
              (("--holdout", MONTH), {UNLOCK: "1"}),                         # the old value
-             (("--holdout", MONTH), {UNLOCK: "2026-10"}),                   # another month
-             (("--holdout", "2026-10"), {UNLOCK: MONTH}),                   # another month's flag
-             (("--holdout", "2026-08"), {UNLOCK: "2026-08"}),               # not a protected month
-             (("--holdout", "2026-10"), {UNLOCK: "2026-10"}),               # protected but not allowlisted
+             (("--holdout", MONTH), {UNLOCK: "2026-11"}),                   # another month
+             (("--holdout", "2026-11"), {UNLOCK: MONTH}),                   # another month's flag
+             (("--holdout", "2026-09"), {UNLOCK: "2026-09"}),               # not a protected month
+             (("--holdout", "2026-11"), {UNLOCK: "2026-11"}),               # protected but not allowlisted
              (("--holdout", "2026-9"), {UNLOCK: MONTH}),                    # malformed
              (("--holdout", MONTH, "2026"), {UNLOCK: MONTH}),               # extra args
-             (("2026", "2026", "9"), {UNLOCK: MONTH}),                      # normal form refuses September always
-             (("2026", "2026", "9"), {UNLOCK: "1"}),
+             (("2026", "2026", "10"), {UNLOCK: MONTH}),                      # normal form refuses October always
+             (("2026", "2026", "10"), {UNLOCK: "1"}),
              (("2026", "2027", "1"), {UNLOCK: MONTH})]
     for args, env in cases:
         r = run_sh(shell, tmp_path, bin_dir, *args, env=env)
@@ -415,9 +427,9 @@ def test_fetch_bts_sh_holdout_policy(shell, tmp_path):
     assert not (tmp_path / "data").exists()
     r = run_sh(shell, tmp_path, bin_dir, "--holdout", MONTH, env={UNLOCK: MONTH})
     assert r.returncode == 0, r.stderr
-    assert log.read_text().strip().endswith("_2026_9.zip") and len(log.read_text().split()) == 1
+    assert log.read_text().strip().endswith("_2026_10.zip") and len(log.read_text().split()) == 1
     assert [str(p.relative_to(tmp_path / "data")) for p in (tmp_path / "data").rglob("*.zip")] == [
-        "holdout/2026-09/bts/On_Time_Marketing_Carrier_On_Time_Performance_Beginning_January_2018_2026_9.zip"]
+        "holdout/2026-10/bts/On_Time_Marketing_Carrier_On_Time_Performance_Beginning_January_2018_2026_10.zip"]
     assert not (tmp_path / "data" / "bts").exists()                         # the main folder was never created
 
 
@@ -428,31 +440,31 @@ def test_metar_and_weather_loaders_take_an_extra_folder(tmp_path):
     main.mkdir()
     hd.mkdir()
     cols = "station,valid,vsby,sknt,gust,skyc1,skyl1,wxcodes,p01i\n"
-    (main / "ATL_2026.csv").write_text(cols + "ATL,2026-08-31 23:53,10,5,,CLR,,,\n")
-    (hd / "ATL_2026-09.csv").write_text(cols + "ATL,2026-09-01 00:53,10,5,,CLR,,,\n")
+    (main / "ATL_2026.csv").write_text(cols + "ATL,2026-09-30 23:53,10,5,,CLR,,,\n")
+    (hd / "ATL_2026-10.csv").write_text(cols + "ATL,2026-10-01 00:53,10,5,,CLR,,,\n")
     airports = pd.Index(["ATL"])
     assert len(metar.load_raw(airports, main)) == 1                          # default: main folder only
     both = metar.load_raw(airports, main, [hd])
     assert len(both) == 2 and set(both["station"]) == {"ATL"}
     M = metar.Metar(airports, main, metar_dirs=[hd])
-    assert M.max_valid == pd.Timestamp("2026-09-01 00:53")
-    assert metar.Metar(airports, main).max_valid == pd.Timestamp("2026-08-31 23:53")
+    assert M.max_valid == pd.Timestamp("2026-10-01 00:53")
+    assert metar.Metar(airports, main).max_valid == pd.Timestamp("2026-09-30 23:53")
 
     wm, wh = tmp_path / "w", tmp_path / "wh"
     wm.mkdir()
     wh.mkdir()
     vcols = [f"{v}_previous_day{d}" for v in ("precipitation", "snowfall", "wind_gusts_10m", "cape", "weather_code") for d in (1, 7)]
-    for folder, t in ((wm, "2026-08-31 23:00"), (wh, "2026-09-01 00:00")):
+    for folder, t in ((wm, "2026-09-30 23:00"), (wh, "2026-10-01 00:00")):
         pd.DataFrame({"airport": ["ATL"], "utc_hour": [pd.Timestamp(t)], **{c: [0.0] for c in vcols}}).to_parquet(folder / "ATL.parquet")
-    assert weather.Weather(airports, wm).max_utc == pd.Timestamp("2026-08-31 23:00")
-    assert weather.Weather(airports, wm, weather_dirs=[wh]).max_utc == pd.Timestamp("2026-09-01 00:00")
+    assert weather.Weather(airports, wm).max_utc == pd.Timestamp("2026-09-30 23:00")
+    assert weather.Weather(airports, wm, weather_dirs=[wh]).max_utc == pd.Timestamp("2026-10-01 00:00")
 
 
 def test_b5_1_run_hard_fails_on_holdout_weather(tmp_path):
     wm = tmp_path / "w"
     wm.mkdir()
     vcols = [f"{v}_previous_day{d}" for v in ("precipitation", "snowfall", "wind_gusts_10m", "cape", "weather_code") for d in (1, 7)]
-    pd.DataFrame({"airport": ["ATL"], "utc_hour": [pd.Timestamp("2026-09-01 00:00")], **{c: [0.0] for c in vcols}}).to_parquet(wm / "ATL.parquet")
+    pd.DataFrame({"airport": ["ATL"], "utc_hour": [pd.Timestamp("2026-10-01 00:00")], **{c: [0.0] for c in vcols}}).to_parquet(wm / "ATL.parquet")
     with pytest.raises(RuntimeError, match="holdout"):
         e.check_weather_holdout(weather.Weather(pd.Index(["ATL"]), wm))
 
@@ -481,7 +493,7 @@ def score_env(tmp_path, hroot, monkeypatch):
     monkeypatch.setenv(UNLOCK, MONTH)
     monkeypatch.setattr(e, "verify_frozen_code", lambda m: None)
     (hroot / MONTH / "metar").mkdir(parents=True)
-    (hroot / MONTH / "metar" / "ATL_2026-09.csv").write_text("data")
+    (hroot / MONTH / "metar" / "ATL_2026-10.csv").write_text("data")
     e.check_marker_path(MONTH, res).write_text(json.dumps({"files": e.hash_holdout_files(MONTH)}))
     return manifest, mp, models, res
 
@@ -494,14 +506,14 @@ def preflight(env, **kw):
 def test_score_preflight_refusals(score_env, hroot, monkeypatch):
     manifest, mp, models, res = score_env
     m, out = preflight(score_env)
-    assert m == manifest and out == res / "h1_b5_1_2026-09.json"
+    assert m == manifest and out == res / "h1_b5_1_2026-10.json"
     monkeypatch.delenv(UNLOCK)
     with pytest.raises(SystemExit, match="locked"):                          # no unlock
         preflight(score_env)
     monkeypatch.setenv(UNLOCK, MONTH)
     with pytest.raises(SystemExit, match="missing"):                         # no manifest
         e.preflight_score(MONTH, results_dir=res, manifest_path=res / "nope.json", models_dir=models)
-    mp.write_text(json.dumps({**manifest, "holdout_month": "2026-10"}))
+    mp.write_text(json.dumps({**manifest, "holdout_month": "2026-11"}))
     with pytest.raises(SystemExit, match="manifest is for"):                 # manifest for another month
         preflight(score_env)
     mp.write_text(json.dumps({**manifest, "airports_file_sha256": "0" * 64}))
@@ -512,10 +524,10 @@ def test_score_preflight_refusals(score_env, hroot, monkeypatch):
     with pytest.raises(SystemExit, match="manifest"):                        # hash mismatch
         preflight(score_env)
     (models / "1d_base.joblib").write_bytes(b"model bytes")
-    (hroot / MONTH / "metar" / "ATL_2026-09.csv").write_text("changed")
+    (hroot / MONTH / "metar" / "ATL_2026-10.csv").write_text("changed")
     with pytest.raises(SystemExit, match="changed since"):                   # data changed after check passed
         preflight(score_env)
-    (hroot / MONTH / "metar" / "ATL_2026-09.csv").write_text("data")
+    (hroot / MONTH / "metar" / "ATL_2026-10.csv").write_text("data")
     e.check_marker_path(MONTH, res).unlink()
     with pytest.raises(SystemExit, match="marker"):                          # check never passed
         preflight(score_env)
@@ -553,13 +565,13 @@ def test_attempt_record_and_reruns_never_overwrite(score_env):
         preflight(score_env, force=True)
     out.write_text('{"original": true}')
     _, r1 = preflight(score_env, force=True, reason="bug in X")
-    assert r1.name == "h1_b5_1_2026-09_rerun1.json" and out.read_text() == '{"original": true}'
+    assert r1.name == "h1_b5_1_2026-10_rerun1.json" and out.read_text() == '{"original": true}'
     e.record_attempt(MONTH, r1, manifest, "bug in X", results_dir=res)
     r1.write_text("{}")
     _, r2 = preflight(score_env, force=True, reason="another")
     assert r2.name.endswith("_rerun2.json")
-    recs = json.loads((res / "h1_b5_1_2026-09.attempts.json").read_text())
-    assert [r["output"] for r in recs] == ["h1_b5_1_2026-09.json", "h1_b5_1_2026-09_rerun1.json"] and recs[1]["reason"] == "bug in X"
+    recs = json.loads((res / "h1_b5_1_2026-10.attempts.json").read_text())
+    assert [r["output"] for r in recs] == ["h1_b5_1_2026-10.json", "h1_b5_1_2026-10_rerun1.json"] and recs[1]["reason"] == "bug in X"
 
 
 def test_force_rerun_with_no_earlier_attempt_is_refused(score_env):
@@ -599,7 +611,7 @@ def test_score_never_fits_a_model(tmp_path, monkeypatch):
     res = tmp_path / "results"
     res.mkdir()
     n = 300
-    ev = pd.DataFrame({"FlightDate": pd.date_range("2026-09-01", periods=30).repeat(10), "cancelled": False,
+    ev = pd.DataFrame({"FlightDate": pd.date_range("2026-10-01", periods=30).repeat(10), "cancelled": False,
                        "delayed": (rng.random(n) < 0.2).astype(float), "disrupted": (rng.random(n) < 0.25).astype(float),
                        "ym": MONTH})
 
@@ -640,11 +652,11 @@ def test_score_never_fits_a_model(tmp_path, monkeypatch):
 def test_freeze_is_refused_when_holdout_data_is_present(hroot, monkeypatch):
     d = hroot / MONTH / "metar"
     d.mkdir(parents=True)
-    (d / "ATL_2026-09.csv").write_text("x")
+    (d / "ATL_2026-10.csv").write_text("x")
     with pytest.raises(SystemExit, match="holdout data"):
         e.stage_freeze(MONTH)
     shutil.rmtree(hroot / MONTH)
-    monkeypatch.setattr(holdout, "locked_files_in_main", lambda *a: ["data/bts/parquet_v2/2026-09.parquet"])
+    monkeypatch.setattr(holdout, "locked_files_in_main", lambda *a: ["data/bts/parquet_v2/2026-10.parquet"])
     with pytest.raises(SystemExit, match="holdout data"):
         e.stage_freeze(MONTH)
     with pytest.raises(SystemExit):
@@ -684,11 +696,11 @@ def test_three_outcome_function(diff, ece_with, ece_base, expected):
 
 
 def test_weekly_brier_diff_is_four_weeks_plus_remainder():
-    days = pd.date_range("2026-09-01", "2026-09-30")
+    days = pd.date_range("2026-10-01", "2026-10-30")
     n = len(days)
     ev = pd.DataFrame({"FlightDate": days, "cancelled": False, "delayed": np.zeros(n)})
     weeks = e.weekly_brier_diff(ev, np.full(n, 0.5), np.full(n, 0.4))
-    assert len(weeks) == 5 and list(weeks)[0].startswith("wk1 09-01..09-07") and list(weeks)[-1].startswith("wk5 09-29..09-30")
+    assert len(weeks) == 5 and list(weeks)[0].startswith("wk1 10-01..10-07") and list(weeks)[-1].startswith("wk5 10-29..10-30")
     assert all(abs(v - 0.09) < 1e-9 for v in weeks.values())                              # 0.25 - 0.16
 
 

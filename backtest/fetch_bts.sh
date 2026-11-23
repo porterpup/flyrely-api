@@ -9,8 +9,8 @@
 # month, only into data/holdout/YYYY-MM/bts/, and only when FLYRELY_HOLDOUT_UNLOCK names the same month
 # (the old value 1 is refused).
 set -eu
-HOLDOUT_START=2026-09
-UNLOCKABLE="2026-09"   # months that may ever be unlocked (mirrors holdout.UNLOCKABLE)
+HOLDOUT_START=2026-10
+UNLOCKABLE="2026-10"   # months that may ever be unlocked (mirrors holdout.UNLOCKABLE)
 HS_Y=${HOLDOUT_START%-*}; HS_M=$(expr "${HOLDOUT_START#*-}" + 0)
 
 if [ "${1-}" = "--holdout" ]; then
@@ -46,7 +46,7 @@ if [ "${1-}" = "--holdout" ]; then
   exit 0
 fi
 
-FIRST=${1-2024}; LAST=${2-2026}; LAST_MONTH=${3-8}   # an explicit empty arg is rejected below, not defaulted
+FIRST=${1-2024}; LAST=${2-2026}; LAST_MONTH=${3-9}   # an explicit empty arg is rejected below, not defaulted
 DIR="$(dirname "$0")/../data/bts/marketing"
 
 # Args must be purely numeric: a typo like "9x" must not slip past the lock below. POSIX sh only (runs under dash in CI).
