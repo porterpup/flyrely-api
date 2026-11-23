@@ -1,0 +1,11 @@
+{
+ "month": "2026-09",
+ "files": {
+  "parquet_v2": "af85be17507d5e93488b6fc3f0f03df2951bcdbb831d3313f7519580b7be8523",
+  "parquet_arr": "c3a4e7485c7de70a56284337b6adf6d848425eb977c38be300fba6cb93378e5e",
+  "cache": "92b34bf6ff414cd459248569e4cf06621e1690b225f0aab1bc4b31c8f09c38fa",
+  "pairs": "0e040ec2e893a49c2ccd120f271b8c45b3c1c0f25979cc794fe7824573396747"
+ },
+ "freeze_sha256": "b7f11fe5de1be661ad8ea4a1ff74799a202a58e77d50e220f5789b54a95f9cc6",
+ "created_utc": "2026-11-23T03:32:55Z"
+}
