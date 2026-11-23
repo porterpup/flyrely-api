@@ -4,9 +4,11 @@ connections at the top-30 hubs, stratified by layover bucket so tight connection
 oversampled. Each pair carries a weight `w` (= candidates in its bucket) to reweight to the all-pairs layover mix.
 
     python backtest/pairs.py [--months 2025-01 2026-08]
+    python backtest/pairs.py --retest [--months 2026-09 2026-09]      # Amendment 1 re-test month only
 
 Input is the per-month cache from arrival_data.py. Output: data/cache/arrival/pairs_YYYY-MM.parquet, keyed by the
-month in which leg 1 is scheduled to arrive. Rows of 2026-09 or later are never loaded.
+month in which leg 1 is scheduled to arrive. Rows of 2026-09 are loaded only with --retest (max_date 2026-09-30);
+later rows never. For months from 2026-09 on the build prints a row count and NO outcome rate (Amendment 1).
 """
 
 import argparse
@@ -29,6 +31,8 @@ MAX_DETOUR = 1.6
 EXCLUDED_NETWORKS = {"NK"}
 HUBS = tuple(mctmod.TOP30)
 BUCKETS = ("tight", "short", "medium", "long")
+MAX_DATE = "2026-08-31"                    # original protocol window
+RETEST_MAX_DATE = "2026-09-30"             # Amendment 1: only with --retest
 
 
 def network_family(net: pd.Series) -> pd.Series:
@@ -131,7 +135,7 @@ def outcomes(x1, y2, c1, c2, div1, layover, m):
 
 
 def build_pairs(legs1: pd.DataFrame, legs2: pd.DataFrame, mct: dict, hubs=HUBS, seed: int = SEED,
-                coords: dict = None, max_date="2026-08-31") -> pd.DataFrame:
+                coords: dict = None, max_date=MAX_DATE) -> pd.DataFrame:
     """Stratified proxy pairs. `legs1` are the legs whose scheduled arrival falls in the target month; `legs2`
     the legs that may depart on those dates (same month and the next). Rows dated after `max_date` are refused."""
     coords = coords or _coords()
@@ -174,22 +178,22 @@ def build_pairs(legs1: pd.DataFrame, legs2: pd.DataFrame, mct: dict, hubs=HUBS, 
     return res
 
 
-def build_month_pairs(ym: str, cache_dir: Path = None, force: bool = False) -> Path:
+def build_month_pairs(ym: str, cache_dir: Path = None, force: bool = False, retest: bool = False) -> Path:
     """Pairs whose leg 1 arrives in `ym`; leg 2 comes from `ym` and the following month if it is in the window."""
-    ad.guard_month(ym)
+    ad.guard_month(ym, retest)
     cache_dir = Path(cache_dir or ad.CACHE_DIR)
     out = cache_dir / f"pairs_{ym}.parquet"
     if out.exists() and not force:
         return out
-    cur = ad.load_cache(ym, cache_dir)
+    cur = ad.load_cache(ym, cache_dir, retest)
     nxt_ym = f"{(pd.Period(ym) + 1)}"
     frames = [cur]
-    if nxt_ym <= ad.LAST_MONTH:
-        frames.append(ad.load_cache(nxt_ym, cache_dir))
+    if nxt_ym <= (ad.RETEST_MONTH if retest else ad.LAST_MONTH):
+        frames.append(ad.load_cache(nxt_ym, cache_dir, retest))
     legs2 = pd.concat(frames, ignore_index=True)
     # row ids refer to `legs2`/`cur` positions; keep a month tag so the evaluator can find the legs again
     tab = mctmod.load_table(ad.ROOT / "models" / "mct_defaults.csv")
-    pairs = build_pairs(cur, legs2, tab)
+    pairs = build_pairs(cur, legs2, tab, max_date=RETEST_MAX_DATE if retest else MAX_DATE)
     pairs = pairs[pairs["ym"] == ym].reset_index(drop=True)
     pairs["ym2"] = np.where(legs2["ym"].to_numpy()[pairs["row2"].to_numpy()] == ym, ym, nxt_ym)
     pairs["row2"] = np.where(pairs["ym2"] == ym, pairs["row2"], pairs["row2"] - len(cur)).astype("int32")
@@ -198,15 +202,26 @@ def build_month_pairs(ym: str, cache_dir: Path = None, force: bool = False) -> P
     return out
 
 
+def summary_line(ym: str, path: Path) -> str:
+    """Row count per pair file. The unweighted proxy miss rate is printed only for months before the re-test month:
+    from 2026-09 on no outcome rate is computed or shown (Amendment 1)."""
+    if ym >= ad.RETEST_MONTH:
+        return f"{path.name} {len(pd.read_parquet(path, columns=['w']))} (outcome rate withheld)"
+    d = pd.read_parquet(path, columns=["miss", "w"])
+    return f"{path.name} {len(d)} miss(unweighted)={d['miss'].mean():.4f}"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--months", nargs=2, default=[ad.FIRST_MONTH, ad.LAST_MONTH])
+    ap.add_argument("--months", nargs=2, default=None)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--retest", action="store_true",
+                    help=f"allow {ad.RETEST_MONTH} (Amendment 1); without --months only that month is built")
     args = ap.parse_args(argv)
-    for ym in ad.months(*args.months):
-        p = build_month_pairs(ym, force=args.force)
-        d = pd.read_parquet(p, columns=["miss", "w"])
-        print(p.name, len(d), f"miss(unweighted)={d['miss'].mean():.4f}", flush=True)
+    window = args.months or ([ad.RETEST_MONTH] * 2 if args.retest else [ad.FIRST_MONTH, ad.LAST_MONTH])
+    for ym in ad.months(*window):
+        p = build_month_pairs(ym, force=args.force, retest=args.retest)
+        print(summary_line(ym, p), flush=True)
 
 
 if __name__ == "__main__":

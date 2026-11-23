@@ -2,10 +2,11 @@
 Build data/bts/parquet_arr: every parquet_v2 column plus the arrival columns (ArrDelay, ArrTime, WheelsOn, TaxiIn,
 ArrDel15, DivReachedDest, DivArrDelay), from the same Marketing Carrier zips as parquet_v2.
 
-    python backtest/prepare_arrival.py [--force]
+    python backtest/prepare_arrival.py [--force] [--retest]
 
-Protocol: backtest/PROTOCOL_ARRIVAL_CONNECTIONS.md. Months 2026-09 and later are never converted: there is no holdout
-flag, locked zips are skipped, and the script exits if FLYRELY_HOLDOUT_UNLOCK is set at all. prepare.py is imported
+Protocol: backtest/PROTOCOL_ARRIVAL_CONNECTIONS.md. The default window is 2025-01..2026-08; 2026-09 is converted only
+with --retest (Amendment 1, after the freeze stage). Locked months (2026-10 on) are never converted: there is no
+holdout flag, locked zips are skipped, and the script exits if FLYRELY_HOLDOUT_UNLOCK is set at all. prepare.py is imported
 for its column spec and zip reader, not edited.
 """
 
@@ -34,6 +35,8 @@ ARRIVAL_COLUMNS = {
     "DivReachedDest": "float32",
     "DivArrDelay": "float32",
 }
+LAST_MONTH = "2026-08"
+RETEST_MONTH = "2026-09"
 COLUMNS = {**prepare.MARKETING_COLUMNS, **ARRIVAL_COLUMNS}
 
 
@@ -65,6 +68,7 @@ def convert(zip_path: Path, out_dir: Path, force: bool = False) -> Path:
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--force", action="store_true", help="rebuild months that already exist")
+    ap.add_argument("--retest", action="store_true", help=f"also convert {RETEST_MONTH} (Amendment 1)")
     args = ap.parse_args(argv)
     _refuse_if_unlock_set()
     zips = sorted(SRC.glob("*.zip"))
@@ -72,8 +76,9 @@ def main(argv=None):
     if locked:
         print("skipping protected holdout zips:", [z.name for z in locked])
         zips = [z for z in zips if z not in locked]
-    # the protocol covers 2025-01..2026-08 only
-    zips = [z for z in zips if (holdout.zip_month(z.name) or "0000-00") >= "2025-01"]
+    # the protocol covers 2025-01..2026-08; Amendment 1 adds 2026-09 behind --retest
+    last = RETEST_MONTH if args.retest else LAST_MONTH
+    zips = [z for z in zips if "2025-01" <= (holdout.zip_month(z.name) or "0000-00") <= last]
     if not zips:
         sys.exit(f"no zips in {SRC}")
     for zp in zips:

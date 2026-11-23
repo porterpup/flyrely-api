@@ -92,3 +92,31 @@ def test_cached_features_equal_main_build_features():
         ref = main.build_features(r["Origin"], r["Dest"], r["FlightDate"].to_pydatetime().replace(hour=int(r["dep_hour"])),
                                   r["Reporting_Airline"])
         assert all(np.isclose(float(ref[k]), float(cached.iloc[i][k]), rtol=1e-5) for k in cached.columns)
+
+
+def test_retest_flag_opens_2026_09_only(monkeypatch):
+    """Amendment 1: 2026-09 is reachable only with retest=True; the default window and the lock are unchanged."""
+    import holdout
+    ad.guard_month("2026-09", retest=True)
+    ad.guard_month("2026-08", retest=True)
+    for bad in ("2026-10", "2027-01", "2024-12"):
+        with pytest.raises(ValueError):
+            ad.guard_month(bad, retest=True)
+    for bad in ("2026-09", "2026-10"):
+        with pytest.raises(ValueError):
+            ad.guard_month(bad)                                          # default window ends 2026-08
+        with pytest.raises(ValueError):
+            ad.load_cache(bad, cache_dir=Path("/nonexistent"))
+    assert ad.LAST_MONTH == "2026-08" and ad.RETEST_MONTH < holdout.LOCKED_FROM
+    monkeypatch.setenv("FLYRELY_HOLDOUT_UNLOCK", "2026-10")
+    with pytest.raises(SystemExit):
+        ad.guard_month("2026-09", retest=True)
+
+
+def test_build_refuses_september_without_retest_and_prints_no_outcome(tmp_path, capsys):
+    with pytest.raises(ValueError):
+        ad.build_month("2026-09", out_dir=tmp_path)
+    p = tmp_path / "2026-09.parquet"
+    pd.DataFrame({"ym": ["2026-09"] * 3, "arr_delay": [5.0, 40.0, np.inf], "dep_delay": [1.0, 2.0, 3.0]}).to_parquet(p)
+    line = ad.summary_line(p)
+    assert line == "2026-09.parquet 3"                                   # name and row count, nothing else
