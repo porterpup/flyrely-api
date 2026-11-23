@@ -88,6 +88,25 @@ def test_open_gate_but_nothing_new(tmp_path, monkeypatch):
     assert rs.refresh(schedule=sch, extra_dir=tmp_path / "extra", main_dir=main, result=res) == "up-to-date"
 
 
+def test_locked_month_is_never_probed_or_downloaded_before_its_score(tmp_path, monkeypatch):
+    """Lock at 2026-10: even if BTS had published October, no probe and no download without h1_b5_1_2026-10.json."""
+    main = tmp_path / "main"
+    main.mkdir()
+    (main / "2026-09.parquet").write_bytes(b"x")
+    calls = []
+    monkeypatch.setattr(rs, "month_published", lambda ym: calls.append(ym) or True)
+    monkeypatch.setattr(rs, "download_month", lambda ym, dest: calls.append(("download", ym)))
+    monkeypatch.setattr(rs, "convert_month", lambda *a: calls.append(("convert", a)))
+    res = tmp_path / "results"
+    res.mkdir()
+    assert rs.fetch_new_months(tmp_path / "extra", main, res) == []
+    assert calls == []
+    (res / "h1_b5_1_2026-10.json").write_text("{}")                       # scored: the month opens
+    monkeypatch.setattr(rs, "month_published", lambda ym: calls.append(ym) or ym == "2026-10")
+    assert rs.fetch_new_months(tmp_path / "extra", main, res) == ["2026-10"]
+    assert calls[0] == "2026-10"
+
+
 # ---------------------------------------------------------------- sanity
 def test_sanity_ok():
     s = rs.sanity_check(schedule_df(), old_rows=90, old_as_of="2026-08")

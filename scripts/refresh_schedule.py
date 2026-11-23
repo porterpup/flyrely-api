@@ -4,11 +4,13 @@
     venv/bin/python scripts/refresh_schedule.py            # what the weekly launchd job runs
     venv/bin/python scripts/refresh_schedule.py --dry-run  # gate + probe only, downloads and swaps nothing
 
-HOLDOUT GATE. The 2026-09 BTS month is the sealed B5.1 holdout (backtest/holdout.py). Until the one-time `score`
-stage has written backtest/results/h1_b5_1_2026-09.json, this job is a logged no-op: no network, no file read.
-It never sets FLYRELY_HOLDOUT_UNLOCK (it removes it from its own environment) and never imports the frozen
-backtest modules except `holdout` and `prepare` read-only. Months from 2026-09 on are kept apart from the
-backtest data, in data/schedule/bts/, so nothing in backtest/ can load them.
+HOLDOUT GATE. Two gates, both in terms of backtest/holdout.py. (1) The H1 gate: until the one-time `score` stage has
+written backtest/results/h1_b5_1_2026-09.json, this job is a logged no-op: no network, no file read. (2) A gate per
+month: a month that is still protected (holdout.is_locked_month, 2026-10 on since the lock-move) is neither probed nor
+downloaded until its own score result backtest/results/h1_b5_1_<month>.json exists. The job never sets
+FLYRELY_HOLDOUT_UNLOCK (it removes it from its own environment) and never imports the frozen backtest modules except
+`holdout` and `prepare` read-only. Months it downloads are kept apart from the backtest data, in data/schedule/bts/,
+so nothing in backtest/ can load them.
 
 Once the gate is open: probe the official BTS download (the same transtats.bts.gov/PREZIP files that
 backtest/fetch_bts.sh uses) for the month after the newest one on disk; download each new month; rebuild with
@@ -43,6 +45,7 @@ log = logging.getLogger("refresh_schedule")
 # the gate must keep following the September score, not the October one.
 SCORE_RESULT = ROOT / "backtest" / "results" / "h1_b5_1_2026-09.json"   # written once by `score`
 SCHEDULE = ROOT / "models" / "route_schedule.csv.gz"
+RESULTS_DIR = ROOT / "backtest" / "results"
 EXTRA_DIR = ROOT / "data" / "schedule" / "bts"          # zips + parquets for months from the holdout on
 BASE_URL = "https://transtats.bts.gov/PREZIP/"
 ZIP_NAME = "On_Time_Marketing_Carrier_On_Time_Performance_Beginning_January_2018_{y}_{m}.zip"
@@ -130,7 +133,7 @@ def convert_month(zip_path: Path, ym: str, out_dir: Path) -> Path:
     return out
 
 
-def fetch_new_months(extra_dir: Path = None, main_dir: Path = None) -> list[str]:
+def fetch_new_months(extra_dir: Path = None, main_dir: Path = None, results_dir: Path = None) -> list[str]:
     """Download and convert every published month after the newest on disk. Returns the months added."""
     extra_dir = extra_dir or EXTRA_DIR
     extra_dir.mkdir(parents=True, exist_ok=True)
@@ -141,6 +144,9 @@ def fetch_new_months(extra_dir: Path = None, main_dir: Path = None) -> list[str]
     ym = have[-1]
     for _ in range(MAX_NEW_MONTHS):
         ym = next_month(ym)
+        if holdout.is_locked_month(ym) and not ((results_dir or RESULTS_DIR) / f"h1_b5_1_{ym}.json").exists():
+            log.info("BTS %s is a protected holdout month and not scored yet: not probed, not downloaded", ym)
+            break
         if not month_published(ym):
             log.info("BTS %s not published yet", ym)
             break

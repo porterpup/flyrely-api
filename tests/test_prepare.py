@@ -45,28 +45,45 @@ def test_marketing_zip_maps_operating_carrier_to_reporting_columns(tmp_path):
     assert pd.api.types.is_datetime64_any_dtype(df["FlightDate"])
 
 
-def _fetch(*args, env=None):
+@pytest.fixture
+def fetch(tmp_path):
+    """Run a copy of fetch_bts.sh in tmp_path with a fake curl that only logs and fails: no test can reach the
+    network, and a case that is not refused shows up as a curl call (checked by every test through `fetch.log`)."""
     import os
-    return subprocess.run(["sh", str(ROOT / "backtest" / "fetch_bts.sh"), *args], capture_output=True, text=True,
-                          env={**os.environ, "PATH": "/nonexistent:/usr/bin:/bin", **(env or {})}, timeout=30)
+    import shutil
+    import stat
+    (tmp_path / "backtest").mkdir()
+    shutil.copy(ROOT / "backtest" / "fetch_bts.sh", tmp_path / "backtest" / "fetch_bts.sh")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(f'#!/bin/sh\necho "$@" >> "{tmp_path}/curl.log"\nexit 22\n')
+    curl.chmod(curl.stat().st_mode | stat.S_IEXEC)
+
+    def run(*args):
+        r = subprocess.run(["sh", str(tmp_path / "backtest" / "fetch_bts.sh"), *args], capture_output=True, text=True,
+                           env={**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=30)
+        assert not (tmp_path / "curl.log").exists(), (args, "curl was called")
+        return r
+    return run
 
 
-def test_holdout_lock_refuses_before_any_download():
+def test_holdout_lock_refuses_before_any_download(fetch):
     for args in (("2026", "2026", "10"), ("2026", "2026", "12"), ("2026", "2027", "1")):
-        r = _fetch(*args)
+        r = fetch(*args)
         assert r.returncode == 2, (args, r.stderr)
         assert "holdout" in r.stderr
         assert "fetching" not in r.stdout        # exited before the download loop
 
 
-def test_holdout_lock_handles_leading_zero_month():
-    r = _fetch("2026", "2026", "010")
+def test_holdout_lock_handles_leading_zero_month(fetch):
+    r = fetch("2026", "2026", "010")
     assert r.returncode == 2 and "holdout" in r.stderr, r.stderr
 
 
-def test_fetch_bts_rejects_non_numeric_args():
+def test_fetch_bts_rejects_non_numeric_args(fetch):
     for args in (("2026", "2026", "9x"), ("2026x", "2026", "1"), ("2024", "", "1"), ("2026", "2026", "-1")):
-        r = _fetch(*args)
+        r = fetch(*args)
         assert r.returncode == 2, (args, r.stderr)
         assert "numeric" in r.stderr and "fetching" not in r.stdout
 

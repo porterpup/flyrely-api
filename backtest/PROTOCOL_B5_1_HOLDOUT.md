@@ -340,12 +340,28 @@ with the freeze commit `89be2a4`. This PR changes `backtest/holdout.py`, which i
 3. `UNLOCKABLE = ("2026-09",)` becomes `("2026-10",)`, and the comment above it is reworded;
 4. the `LAST_ALLOWED_DATE` comment changes from 2026-08-31 to 2026-09-30 (the value itself follows `LOCKED_FROM`).
 
-To verify before the October score: `git diff 89be2a4 HEAD -- backtest/holdout.py` must show exactly those four hunks, and
+To verify before the October score: `git diff 89be2a4 HEAD -- backtest/holdout.py` must show exactly those four changes
+(git shows them as two hunks), and
 `git diff 89be2a4 HEAD -- flyrely_features backtest/runup.py backtest/backtest.py backtest/experiments_b5.py
 backtest/fetch_faa_adv.py` must be empty. `experiments_b5.py` is not changed here: its `FORBIDDEN_FROM` is
 `holdout.LOCKED_FROM_TS`, so it follows the new lock without an edit.
 
-As the code stands, `preflight_score` still refuses, because the `holdout.py` blob differs from the freeze commit's. The
-October run therefore needs a recorded decision on how the preflight accepts the four hunks above (for example, pointing
-the manifest's code commit at the lock-move merge commit with the model files unchanged, or an approved override). That
-decision is not made in this PR, and `experiments_b5.py` is not edited here.
+**What the October preflight does today.** `preflight_score` refuses for two reasons: (1) the `holdout.py` blob differs
+from the freeze commit's; (2) `backtest/results/h1_models_manifest.json` has `holdout_month` `"2026-09"`, and the
+preflight requires the manifest to be for the month being scored.
+
+**The refusal's suggested remedy is NOT allowed for October.** The message says to re-run `--stage freeze`. That refits
+the models, and the refit would include September, which breaks section 7.1 ("the same frozen models; no refit").
+
+**Recommended route (recorded, not implemented in this PR).** Before the October check or score, make one reviewed commit
+that edits only `backtest/results/h1_models_manifest.json`:
+- `holdout_month` becomes `"2026-10"`;
+- `code.commit` becomes the merge commit of this PR;
+- every model `sha256` and `airports_file_sha256` stay byte-for-byte unchanged;
+- add an `amendments` record holding the original values (`holdout_month` 2026-09, `code.commit` 89be2a4), the reason
+  (the policy-only lock-move above), and the verification (`holdout.py` shows only the four listed changes; the diff of
+  the other `TREE_PATHS` against `89be2a4` is empty).
+
+**Freeze of code from this merge on.** No `TREE_PATHS` file (`flyrely_features/`, `backtest/runup.py`,
+`backtest/backtest.py`, `backtest/experiments_b5.py`, `backtest/holdout.py`, `backtest/fetch_faa_adv.py`) may change
+after this PR merges and before the October score. `experiments_b5.py` is not edited here.
