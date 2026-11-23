@@ -205,10 +205,11 @@ Once the H1 report is merged, September 2026 is **spent**. It becomes ordinary d
 use. The September files are moved from `data/holdout/2026-09/` into the main folders only then, by a separate commit
 that changes the guard (section 8, item 1).
 
-## 7. Policy for October 2026 and the next clean holdout (PENDING SEAN'S APPROVAL)
+## 7. Policy for October 2026 and the next clean holdout (APPROVED 2026-11-10 by Sean, recorded in HANDOFF.md)
 
-This is the roadmap recommendation (section 6 and decision 9). Until Sean approves it, **October 2026 onward stays locked**
-exactly as now, and nothing below is run.
+This is the roadmap recommendation (section 6 and decision 9). Sean approved it on 2026-11-10 (recorded in HANDOFF.md).
+The guard now follows it (lock-move of 2026-11-22, see the note at the end of this file): **October 2026 onward is
+locked**, and only October 2026 can be unlocked, for the 7.1 second check.
 
 **7.1 October 2026: second confirmation.** When BTS October lands (around mid-December), run this same protocol again with
 `2026-10` in place of `2026-09`. That means: the same frozen models (the stage-1 manifest; no refit), trailing rates
@@ -316,3 +317,35 @@ rebuild gave 30 days and passes.
 
 **Disclosure.** The gap timestamps above were read from the September METAR files before stage 3. This was METAR only; no
 delay outcomes were read.
+
+## Note 2026-11-22: lock-move (section 6, section 8 item 6) and the October code-identity exception
+
+Done in the PR on branch `chore/holdout-lock-move-2026-10`, after the H1 report (PR #69) was merged.
+
+- **September 2026 is ordinary data.** Its files were copied (not deleted) from `data/holdout/2026-09/` into the main
+  folders by `backtest/merge_holdout_month.py 2026-09`. Only rows dated 2026-09-01..2026-09-30 were taken; the
+  month-plus-one-day feature inputs dated 2026-10-01 belong to October and were left out. `data/holdout/2026-09/` stays
+  in place as the evidence the pass marker's hashes refer to, and `metar_first_try/` was not moved. Backups of every
+  changed main file are in `data/backup/holdout_merge_2026-09/`.
+- **The lock starts at 2026-10.** `holdout.LOCKED_FROM = "2026-10"`, `UNLOCKABLE = ("2026-10",)`, `LAST_ALLOWED_DATE`
+  2026-09-30; `fetch_bts.sh` mirrors it. October 2026 stays locked and is the 7.1 second check. 2027-01 on is the new
+  clean holdout (7.3).
+
+**October code-identity exception.** The October `score` preflight (`verify_frozen_code`) compares the `TREE_PATHS` trees
+with the freeze commit `89be2a4`. This PR changes `backtest/holdout.py`, which is one of them (blob `694b0896...` at
+`89be2a4` and at master 507b766). The only allowed difference is this PR's policy-only change to that file, nothing else:
+
+1. the module docstring sentence about `LOCKED_FROM` (comment text);
+2. `LOCKED_FROM = "2026-09"` becomes `"2026-10"`;
+3. `UNLOCKABLE = ("2026-09",)` becomes `("2026-10",)`, and the comment above it is reworded;
+4. the `LAST_ALLOWED_DATE` comment changes from 2026-08-31 to 2026-09-30 (the value itself follows `LOCKED_FROM`).
+
+To verify before the October score: `git diff 89be2a4 HEAD -- backtest/holdout.py` must show exactly those four hunks, and
+`git diff 89be2a4 HEAD -- flyrely_features backtest/runup.py backtest/backtest.py backtest/experiments_b5.py
+backtest/fetch_faa_adv.py` must be empty. `experiments_b5.py` is not changed here: its `FORBIDDEN_FROM` is
+`holdout.LOCKED_FROM_TS`, so it follows the new lock without an edit.
+
+As the code stands, `preflight_score` still refuses, because the `holdout.py` blob differs from the freeze commit's. The
+October run therefore needs a recorded decision on how the preflight accepts the four hunks above (for example, pointing
+the manifest's code commit at the lock-move merge commit with the model files unchanged, or an approved override). That
+decision is not made in this PR, and `experiments_b5.py` is not edited here.

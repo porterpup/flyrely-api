@@ -80,4 +80,4 @@ def test_hhmm():
 
 
 def test_only_months_before_holdout():
-    assert all(m < "2026-09" for m in brs.allowed_months())
+    assert all(m < "2026-10" for m in brs.allowed_months())

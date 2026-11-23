@@ -39,7 +39,9 @@ import prepare  # noqa: E402  read-only: the zip reader and column map
 
 log = logging.getLogger("refresh_schedule")
 
-SCORE_RESULT = ROOT / "backtest" / "results" / f"h1_b5_1_{holdout.LOCKED_FROM}.json"   # written once by `score`
+# The H1 (September 2026) score result. Pinned to that month: the lock moved to 2026-10 (the B5.1 second check), and
+# the gate must keep following the September score, not the October one.
+SCORE_RESULT = ROOT / "backtest" / "results" / "h1_b5_1_2026-09.json"   # written once by `score`
 SCHEDULE = ROOT / "models" / "route_schedule.csv.gz"
 EXTRA_DIR = ROOT / "data" / "schedule" / "bts"          # zips + parquets for months from the holdout on
 BASE_URL = "https://transtats.bts.gov/PREZIP/"

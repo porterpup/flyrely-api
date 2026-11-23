@@ -1,6 +1,7 @@
 """The one holdout policy (PROTOCOL_B5_1_HOLDOUT.md, section 8).
 
-Months from LOCKED_FROM on are the protected holdout. Nothing reads, downloads or loads them unless the command
+Months from LOCKED_FROM on are the protected holdout (2026-10 on since the lock-move of 2026-11-22; September 2026
+was spent at H1 and now sits in the main folders). Nothing reads, downloads or loads them unless the command
 carries BOTH `--holdout YYYY-MM` and a prefix `FLYRELY_HOLDOUT_UNLOCK=YYYY-MM` naming the same month. The unlock opens
 that one month only. The old value `1` is refused. Holdout files live only under data/holdout/YYYY-MM/, which no main
 loader reads.
@@ -17,12 +18,13 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCKED_FROM = "2026-09"                                   # first protected month
+LOCKED_FROM = "2026-10"                                   # first protected month
 LOCKED_FROM_TS = pd.Timestamp(f"{LOCKED_FROM}-01")
-# Only these months may ever be unlocked. October 2026 on stays refused until the policy (protocol section 7) is
-# approved and this tuple is changed in a reviewed commit. fetch_bts.sh mirrors it (UNLOCKABLE).
-UNLOCKABLE = ("2026-09",)
-LAST_ALLOWED_DATE = (LOCKED_FROM_TS - pd.Timedelta(days=1)).date()   # 2026-08-31
+# Only these months may ever be unlocked: October 2026 is the B5.1 second check (protocol section 7.1, approved by
+# Sean 2026-11-10). November 2026 on stays refused. September 2026 was spent at H1 and is ordinary data now (section 6).
+# fetch_bts.sh mirrors it (UNLOCKABLE).
+UNLOCKABLE = ("2026-10",)
+LAST_ALLOWED_DATE = (LOCKED_FROM_TS - pd.Timedelta(days=1)).date()   # 2026-09-30
 UNLOCK_VAR = "FLYRELY_HOLDOUT_UNLOCK"
 HOLDOUT_ROOT = ROOT / "data" / "holdout"
 MODELS_DIR = HOLDOUT_ROOT / "models"
