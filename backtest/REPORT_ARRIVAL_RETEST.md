@@ -35,10 +35,22 @@ At t=15:
 
 The re-test overcorrected:
 - Jan–Aug failed by predicting too low: 19.5% predicted against 23.6% observed.
-- The nudge was learned on March–August, which includes the late-running spring and summer months. It raised the level, as it was designed to.
-- September 2026 ran markedly *less* late (22.7% at t=15), so L-S now predicts too high by about 4 points.
+- The nudge was learned on March–August, when 24.5% of flights were late at t=15. It raised the level, as it was designed to.
+- September 2026 ran less late (22.7% at t=15), so L-S now predicts too high by about 4 points.
 
-**The miss looks seasonal, not a fixed 2026 shift.** A single constant offset learned on one season cannot track that. This reading is drawn after seeing the result, so it is a hypothesis for any 2027 protocol, not a finding. A3 passing again confirms that the ranking is sound. The problem remains calibration.
+**Reference only (gates nothing, per the amendment): the frozen ladder without the offset (arm L) was well calibrated on September.**
+
+| Threshold | Predicted | Observed | ECE | Max decile gap | Brier |
+|---|---|---|---|---|---|
+| t=15 | 22.2% | 22.7% | 0.0058 | 0.019 | 0.1675 |
+| t=45 | — | — | 0.0049 | — | — |
+| t=120 | — | — | 0.0028 | — | — |
+
+So the A1 miss on September came from the offset alone. The base ladder ran too low across Jan–Aug, then sat close on September. Together, those point to the level varying from month to month (possibly seasonally), rather than a fixed 2026 shift that one constant offset could correct.
+
+This reading is drawn after seeing the result. It is a hypothesis for any 2027 protocol, not a finding, and arm L's September fit cannot be used to ship it: arm L already failed the pre-registered Jan–Aug evaluation, and one good month is not a confirmation.
+
+Ranking still passes A3. At t=15, AUC is 0.648, below the production departure baseline's 0.658.
 
 ## What this means for the product
 
