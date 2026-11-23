@@ -1,7 +1,7 @@
 # Protocol PAID TRIAL: does FlightAware AeroAPI name a flight's aircraft and inbound flight earlier and more accurately than free SWIM linkage?
 
 Dated 2026-11-22. Pre-registered: this file is committed BEFORE any trial call exists (trial days are 2026-12-01 to 2026-12-03).
-Sean approved this trial for planning on 2026-11-22. Data collection waits for FlightAware's written OK (see Gate, S0).
+Sean approved this trial for planning on 2026-11-22. Data collection waits only for the portal checks in the Gate (S0), which Sean's risk acceptance otherwise satisfies.
 
 ## Question
 
@@ -13,6 +13,9 @@ free SWIM linkage (the CHAIN methods, see `PROTOCOL_CHAIN.md`)?
 - No API call happens until FlightAware gives written permission for an evaluation on the Personal tier or with trial credit,
   or Sean explicitly accepts the risk.
 - Record the outcome in HANDOFF.md.
+- S0 is satisfied: on 2026-11-22 Sean explicitly accepted the risk of running the evaluation on the Personal tier without asking
+  FlightAware first, because FlyRely is not selling anything yet. The Personal tier's terms describe it as non-commercial use, and
+  this was weighed.
 - Before the run, verify in the AeroAPI portal: prices, the rate limit, when the credit resets, and the data-retention terms.
 
 ## Provider and endpoint
