@@ -2,11 +2,14 @@
 Month-by-month arrival data and caches (protocol: backtest/PROTOCOL_ARRIVAL_CONNECTIONS.md).
 
     python backtest/arrival_data.py [--months 2025-01 2026-08] [--force]
+    python backtest/arrival_data.py --retest [--months 2026-09 2026-09]      # Amendment 1 re-test month only
 
 Reads data/bts/parquet_arr one month at a time through backtest.load_months, computes the 18 committed features
 (backtest.committed_features) and writes a float32 cache per month to data/cache/arrival/YYYY-MM.parquet: features,
 labels, keys, and the hub-local wall-clock scheduled departure/arrival used by the proxy-pair builder (pairs.py).
-Months before 2025-01 and from 2026-09 on are refused; the script exits if FLYRELY_HOLDOUT_UNLOCK is set.
+Months before 2025-01 are refused, and so is 2026-09 unless `--retest` is given (Amendment 1 of the protocol: the
+original evaluation window stays 2025-01..2026-08). 2026-10 on is the protected holdout and is never allowed. The
+script exits if FLYRELY_HOLDOUT_UNLOCK is set. The build prints a row count per month and no outcome rate.
 """
 
 import argparse
@@ -26,15 +29,35 @@ ARR_PARQUET = ROOT / "data" / "bts" / "parquet_arr"
 CACHE_DIR = ROOT / "data" / "cache" / "arrival"
 AIRPORTS_REF = ROOT / "models" / "airports_ref.csv"
 FIRST_MONTH = "2025-01"
-LAST_MONTH = "2026-08"
+LAST_MONTH = "2026-08"                    # the original protocol window ends here
+RETEST_MONTH = "2026-09"                  # Amendment 1 evaluation month, reachable only with retest=True
 UNLOCK_VAR = holdout.UNLOCK_VAR
+assert RETEST_MONTH < holdout.LOCKED_FROM, "the re-test month must be before the protected holdout"
 
 
-def guard_month(ym: str):
+FREEZE_FILE = ROOT / "backtest" / "results" / "arrival_retest_freeze.json"
+
+
+def require_committed_freeze(path: Path = None, git=None) -> None:
+    """--retest is allowed only after the freeze stage: the freeze file exists and is committed (tracked, unmodified).
+    Used by arrival_data.py, pairs.py and prepare_arrival.py before they build any September file."""
+    import subprocess
+    path = Path(path or FREEZE_FILE)
+    git = git or (lambda *a: subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True))
+    if not path.exists():
+        sys.exit(f"--retest refused: {path.name} does not exist (run eval_arrival_retest.py --stage freeze first)")
+    if git("ls-files", "--error-unmatch", str(path)).returncode:
+        sys.exit(f"--retest refused: {path.name} is not committed")
+    if git("status", "--porcelain", "--", str(path)).stdout.strip():
+        sys.exit(f"--retest refused: {path.name} has uncommitted changes")
+
+
+def guard_month(ym: str, retest: bool = False):
     if UNLOCK_VAR in os.environ:
         sys.exit(f"{UNLOCK_VAR} is set; arrival scripts never run with it")
-    if not (FIRST_MONTH <= ym <= LAST_MONTH):
-        raise ValueError(f"{ym} is outside the protocol window {FIRST_MONTH}..{LAST_MONTH}")
+    last = RETEST_MONTH if retest else LAST_MONTH
+    if not (FIRST_MONTH <= ym <= last):
+        raise ValueError(f"{ym} is outside the protocol window {FIRST_MONTH}..{last}")
 
 
 def airport_tz() -> dict:
@@ -116,8 +139,8 @@ def build_cache_frame(df: pd.DataFrame, feats: pd.DataFrame, tz_of: dict) -> pd.
     return pd.concat([out, meta], axis=1)
 
 
-def build_month(ym: str, force: bool = False, out_dir: Path = None) -> Path:
-    guard_month(ym)
+def build_month(ym: str, force: bool = False, out_dir: Path = None, retest: bool = False) -> Path:
+    guard_month(ym, retest)
     out_dir = Path(out_dir or CACHE_DIR)
     out = out_dir / f"{ym}.parquet"
     if out.exists() and not force:
@@ -127,7 +150,7 @@ def build_month(ym: str, force: bool = False, out_dir: Path = None) -> Path:
     bt.PARQUET = ARR_PARQUET
     try:
         df = bt.load_months(ym, ym)
-        assert df["FlightDate"].max() < holdout.LOCKED_FROM_TS, "a date on or after 2026-09 was loaded"
+        assert df["FlightDate"].max() < holdout.LOCKED_FROM_TS, f"a date on or after {holdout.LOCKED_FROM} was loaded"
         feats = bt.committed_features(df)
     finally:
         bt.PARQUET = old
@@ -137,8 +160,8 @@ def build_month(ym: str, force: bool = False, out_dir: Path = None) -> Path:
     return out
 
 
-def load_cache(ym: str, cache_dir: Path = None) -> pd.DataFrame:
-    guard_month(ym)
+def load_cache(ym: str, cache_dir: Path = None, retest: bool = False) -> pd.DataFrame:
+    guard_month(ym, retest)
     return pd.read_parquet(Path(cache_dir or CACHE_DIR) / f"{ym}.parquet")
 
 
@@ -146,14 +169,24 @@ def months(start: str = FIRST_MONTH, end: str = LAST_MONTH) -> list[str]:
     return [f"{p.year}-{p.month:02d}" for p in pd.period_range(start, end, freq="M")]
 
 
+def summary_line(path: Path) -> str:
+    """File name and row count only: the build never prints an outcome rate (Amendment 1)."""
+    return f"{path.name} {len(pd.read_parquet(path, columns=['ym']))}"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--months", nargs=2, metavar=("START", "END"), default=[FIRST_MONTH, LAST_MONTH])
+    ap.add_argument("--months", nargs=2, metavar=("START", "END"), default=None)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--retest", action="store_true",
+                    help=f"allow {RETEST_MONTH} (Amendment 1); without --months only that month is built")
     args = ap.parse_args(argv)
-    for ym in months(*args.months):
-        p = build_month(ym, args.force)
-        print(p.name, len(pd.read_parquet(p, columns=["ym"])), flush=True)
+    if args.retest:
+        require_committed_freeze()
+    window = args.months or ([RETEST_MONTH, RETEST_MONTH] if args.retest else [FIRST_MONTH, LAST_MONTH])
+    for ym in months(*window):
+        p = build_month(ym, args.force, retest=args.retest)
+        print(summary_line(p), flush=True)
 
 
 if __name__ == "__main__":

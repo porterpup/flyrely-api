@@ -65,3 +65,20 @@ def test_script_has_no_holdout_flag():
                        capture_output=True, text=True, env={k: v for k, v in os.environ.items()
                                                             if k != "FLYRELY_HOLDOUT_UNLOCK"})
     assert r.returncode != 0 and "unrecognized" in r.stderr
+
+
+def test_september_is_converted_only_with_retest(tmp_path, monkeypatch, capsys):
+    """Amendment 1: the default window ends 2026-08, --retest adds 2026-09, 2026-10 stays locked."""
+    src, out = tmp_path / "marketing", tmp_path / "arr"
+    src.mkdir()
+    for m in (8, 9, 10):
+        zp = _zip(tmp_path, 2026, m)
+        zp.rename(src / zp.name)
+    monkeypatch.setattr(prepare_arrival, "SRC", src)
+    monkeypatch.setattr(prepare_arrival, "OUT", out)
+    prepare_arrival.main([])
+    assert sorted(p.name for p in out.glob("*.parquet")) == ["2026-08.parquet"]
+    import arrival_data
+    monkeypatch.setattr(arrival_data, "require_committed_freeze", lambda *a, **k: None)
+    prepare_arrival.main(["--retest"])
+    assert sorted(p.name for p in out.glob("*.parquet")) == ["2026-08.parquet", "2026-09.parquet"]

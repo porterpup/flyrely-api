@@ -116,3 +116,32 @@ def test_outcomes_unit():
     miss, dis = pairs.outcomes(np.array([30.0]), np.array([0.0]), np.array([False]), np.array([False]),
                                np.array([False]), np.array([60]), np.array([40]))
     assert miss[0] and dis[0]
+
+
+def test_max_date_opens_september_only_for_the_retest():
+    late = leg("SFO", "DEN", "2026-09-02 07:00", "2026-09-02 10:00")
+    dep = leg("DEN", "ORD", "2026-09-02 11:00", "2026-09-02 14:00", fn=2)
+    with pytest.raises(ValueError):
+        build(frame(late, dep))                                          # default window ends 2026-08-31
+    r = pairs.build_pairs(frame(late, dep), frame(late, dep), MCT, hubs=HUBS, max_date=pairs.RETEST_MAX_DATE)
+    assert len(r) == 1 and r.ym.iloc[0] == "2026-09"
+    after = leg("SFO", "DEN", "2026-10-01 07:00", "2026-10-01 10:00")
+    with pytest.raises(ValueError):
+        pairs.build_pairs(frame(after, dep), frame(after, dep), MCT, hubs=HUBS, max_date=pairs.RETEST_MAX_DATE)
+
+
+def test_month_builder_refuses_september_without_retest(tmp_path):
+    with pytest.raises(ValueError):
+        pairs.build_month_pairs("2026-09", cache_dir=tmp_path)
+    with pytest.raises(ValueError):
+        pairs.build_month_pairs("2026-10", cache_dir=tmp_path, retest=True)
+
+
+def test_no_outcome_rate_is_printed_from_september_on(tmp_path):
+    f = tmp_path / "pairs.parquet"
+    pd.DataFrame({"miss": [True, False, True, False], "w": [1.0] * 4}).to_parquet(f)
+    old = pairs.summary_line("2026-08", f)
+    assert "miss(unweighted)=0.5000" in old                              # earlier months keep their line
+    for ym in ("2026-09", "2026-10"):
+        new = pairs.summary_line(ym, f)
+        assert "miss" not in new.replace("withheld", "") and "0.5" not in new and "4" in new
