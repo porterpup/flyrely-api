@@ -78,5 +78,7 @@ def test_september_is_converted_only_with_retest(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(prepare_arrival, "OUT", out)
     prepare_arrival.main([])
     assert sorted(p.name for p in out.glob("*.parquet")) == ["2026-08.parquet"]
+    import arrival_data
+    monkeypatch.setattr(arrival_data, "require_committed_freeze", lambda *a, **k: None)
     prepare_arrival.main(["--retest"])
     assert sorted(p.name for p in out.glob("*.parquet")) == ["2026-08.parquet", "2026-09.parquet"]

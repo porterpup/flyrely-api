@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -120,3 +121,26 @@ def test_build_refuses_september_without_retest_and_prints_no_outcome(tmp_path, 
     pd.DataFrame({"ym": ["2026-09"] * 3, "arr_delay": [5.0, 40.0, np.inf], "dep_delay": [1.0, 2.0, 3.0]}).to_parquet(p)
     line = ad.summary_line(p)
     assert line == "2026-09.parquet 3"                                   # name and row count, nothing else
+
+
+def test_retest_builds_need_a_committed_freeze_file(tmp_path):
+    f = tmp_path / "freeze.json"
+    ok = SimpleNamespace(returncode=0, stdout="")
+    with pytest.raises(SystemExit, match="does not exist"):
+        ad.require_committed_freeze(f, git=lambda *a: ok)
+    f.write_text("{}")
+    with pytest.raises(SystemExit, match="not committed"):
+        ad.require_committed_freeze(f, git=lambda *a: SimpleNamespace(returncode=1, stdout=""))
+    with pytest.raises(SystemExit, match="uncommitted"):
+        ad.require_committed_freeze(f, git=lambda *a: SimpleNamespace(returncode=0, stdout=" M freeze.json\n")
+                                    if a[0] == "status" else ok)
+    ad.require_committed_freeze(f, git=lambda *a: ok)
+
+
+def test_retest_entry_points_refuse_without_a_committed_freeze(monkeypatch):
+    import pairs
+    import prepare_arrival
+    monkeypatch.setattr(ad, "FREEZE_FILE", Path("/nonexistent/arrival_retest_freeze.json"))
+    for main in (ad.main, pairs.main, prepare_arrival.main):
+        with pytest.raises(SystemExit, match="--retest refused"):
+            main(["--retest"])

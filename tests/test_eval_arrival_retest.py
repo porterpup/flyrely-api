@@ -375,6 +375,61 @@ def test_c_confirmation_mapping_d4():
     assert R.confirmation_outcome(_c(c6=False)) == "no_connection_numbers_c6_failed"
     assert R.confirmation_outcome(_c(c4=False)) == "serve_layover_table_B-L_itin-layover-table-v1"
     assert R.confirmation_outcome(_c(c1=False, c4=False)) == "no_connection_numbers"
+    # same ordering as the original connection_metrics: C6 failing does not hide the B-L fallback
+    assert R.confirmation_outcome(_c(c4=False, c6=False)) == "serve_layover_table_B-L_itin-layover-table-v1"
+    assert R.confirmation_outcome(_c(c1=False, c6=False)) == "no_connection_numbers"
+
+
+def test_confirmation_outcome_matches_the_original_ordering_for_every_combination():
+    import itertools
+    for c1, c2, c3, c4, c6 in itertools.product([True, False], repeat=5):
+        dec = _c(c1, c2, c3, c4, c6)
+        orig = {k: {"pass": v["pass"]} for k, v in dec.items()}
+        # the branch order of E.connection_metrics, evaluated on the same flags
+        if c1 and c2 and c3 and c4 and c6:
+            want = "ship_miss_probability_for_validated_connections"
+        elif c1 and c2 and c3 and not c4:
+            want = "serve_layover_table_B-L_itin-layover-table-v1"
+        elif not (c1 and c2 and c3):
+            want = "no_connection_numbers"
+        else:
+            want = "no_connection_numbers_c6_failed"
+        assert R.confirmation_outcome(orig) == want
+
+
+def test_freeze_refuses_model_hashes_that_differ_from_the_amendment():
+    good = {k: {"file": "f", "sha256": v} for k, v in R.EXPECTED_MODEL_SHA256.items()}
+    R.verify_expected_hashes(good)
+    for k in good:
+        bad = {**good, k: {"file": "f", "sha256": "0" * 64}}
+        with pytest.raises(SystemExit, match=k):
+            R.verify_expected_hashes(bad)
+    with pytest.raises(SystemExit):
+        R.verify_expected_hashes({})
+    import re
+    doc = (ROOT / "backtest" / "PROTOCOL_ARRIVAL_CONNECTIONS.md").read_text()
+    for h in R.EXPECTED_MODEL_SHA256.values():
+        assert h in doc                                                  # the constants are the amendment's values
+
+
+def test_decide_arrival_is_the_same_code_as_the_original_block():
+    """AST equality between decide_arrival and the A1-A4 block of eval_arrival_connections.arrival_evaluation."""
+    import ast
+    import inspect
+
+    def body(fn_src, name):
+        fn = next(n for n in ast.walk(ast.parse(fn_src)) if isinstance(n, ast.FunctionDef) and n.name == name)
+        return fn.body
+
+    def block(stmts):
+        start = next(i for i, n in enumerate(stmts) if isinstance(n, ast.Assign)
+                     and ast.unparse(n.targets[0]) == "t" and ast.unparse(n.value) == "rep['thresholds']")
+        end = next(i for i, n in enumerate(stmts) if isinstance(n, ast.If) and i > start)
+        return [ast.dump(n) for n in stmts[start:end + 1]]
+
+    orig = block(body(inspect.getsource(E), "arrival_evaluation"))
+    mine = block(body(inspect.getsource(R), "decide_arrival"))
+    assert len(orig) == 7 and orig == mine
 
 
 def test_clarification_16_uses_the_retest_arrival_outcome():

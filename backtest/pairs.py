@@ -218,6 +218,8 @@ def main(argv=None):
     ap.add_argument("--retest", action="store_true",
                     help=f"allow {ad.RETEST_MONTH} (Amendment 1); without --months only that month is built")
     args = ap.parse_args(argv)
+    if args.retest:
+        ad.require_committed_freeze()
     window = args.months or ([ad.RETEST_MONTH] * 2 if args.retest else [ad.FIRST_MONTH, ad.LAST_MONTH])
     for ym in ad.months(*window):
         p = build_month_pairs(ym, force=args.force, retest=args.retest)

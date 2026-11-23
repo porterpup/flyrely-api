@@ -35,6 +35,23 @@ UNLOCK_VAR = holdout.UNLOCK_VAR
 assert RETEST_MONTH < holdout.LOCKED_FROM, "the re-test month must be before the protected holdout"
 
 
+FREEZE_FILE = ROOT / "backtest" / "results" / "arrival_retest_freeze.json"
+
+
+def require_committed_freeze(path: Path = None, git=None) -> None:
+    """--retest is allowed only after the freeze stage: the freeze file exists and is committed (tracked, unmodified).
+    Used by arrival_data.py, pairs.py and prepare_arrival.py before they build any September file."""
+    import subprocess
+    path = Path(path or FREEZE_FILE)
+    git = git or (lambda *a: subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True))
+    if not path.exists():
+        sys.exit(f"--retest refused: {path.name} does not exist (run eval_arrival_retest.py --stage freeze first)")
+    if git("ls-files", "--error-unmatch", str(path)).returncode:
+        sys.exit(f"--retest refused: {path.name} is not committed")
+    if git("status", "--porcelain", "--", str(path)).stdout.strip():
+        sys.exit(f"--retest refused: {path.name} has uncommitted changes")
+
+
 def guard_month(ym: str, retest: bool = False):
     if UNLOCK_VAR in os.environ:
         sys.exit(f"{UNLOCK_VAR} is set; arrival scripts never run with it")
@@ -164,6 +181,8 @@ def main(argv=None):
     ap.add_argument("--retest", action="store_true",
                     help=f"allow {RETEST_MONTH} (Amendment 1); without --months only that month is built")
     args = ap.parse_args(argv)
+    if args.retest:
+        require_committed_freeze()
     window = args.months or ([RETEST_MONTH, RETEST_MONTH] if args.retest else [FIRST_MONTH, LAST_MONTH])
     for ym in months(*window):
         p = build_month(ym, args.force, retest=args.retest)

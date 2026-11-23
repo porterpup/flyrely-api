@@ -71,6 +71,9 @@ def main(argv=None):
     ap.add_argument("--retest", action="store_true", help=f"also convert {RETEST_MONTH} (Amendment 1)")
     args = ap.parse_args(argv)
     _refuse_if_unlock_set()
+    if args.retest:
+        import arrival_data
+        arrival_data.require_committed_freeze()
     zips = sorted(SRC.glob("*.zip"))
     locked = [z for z in zips if holdout.is_locked_month(holdout.zip_month(z.name) or "0000-00")]
     if locked:

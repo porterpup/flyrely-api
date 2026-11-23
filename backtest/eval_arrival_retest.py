@@ -52,6 +52,12 @@ ATTEMPTS_NAME = f"arrival_retest_{EVAL_MONTH}.attempts.json"
 OUT_NAME = f"arrival_retest_{EVAL_MONTH}.json"
 MARKER_NAME = f"arrival_retest_check_{EVAL_MONTH}.pass.json"
 EXPECTED_ROWS = 630_177                         # parquet_v2/2026-09 (published in the H1 report)
+EXPECTED_MODEL_SHA256 = {                        # hard-coded from Amendment 1; the freeze refuses on any mismatch
+    "arrival_ladder": "eec7f6b98e25f7da9450258fbb9f524b4e3cc91693491869cec9edec7fb8f53c",
+    "production_model": "fa854d7561663b0202f43b05741fe57f92699f2e99baf150e9dcd327097a5bf7",
+    "connection_dependence": "0c513c96b8b73e034c0a663bf8f8c08e6b27c0b83e3f5bf6a66d09a42baad761",
+    "mct_defaults": "ea889882d2f3c54995cf00abb3c58da31be9fdae5ac06ec8f006822873a054dd",
+}
 CLIMATOLOGY_MONTHS = E.FIT_MONTHS               # 2025-01..06, as in the original evaluation
 BL_MONTHS = ("2025-07", "2025-12")              # B-L table months, as in the original evaluation
 CONFIG = {"frac": 1.0}                          # E.score_month reads cfg["frac"] only
@@ -244,12 +250,8 @@ class RetestStore(E.Store):
         refuse_if_unlock_set()
         if ym in self._pred:
             return self._pred[ym]
-        path = ad.CACHE_DIR / f"pred_{ym}.npz"
-        if path.exists():
-            z = np.load(path, allow_pickle=False)
-            if str(z["sha"]) == self.sha:
-                self._pred[ym] = {k: z[k] for k in ("arr", "dep", "cancel", "p_prod", "rearr")}
-                return self._pred[ym]
+        # September predictions are always computed here, kept in memory, never read from or written to disk:
+        # a stale pred_2026-09.npz can never be reused, and the check stage needs no extra rule.
         c = ad.load_cache(ym, retest=True)
         X = c[self.names].to_numpy(dtype=np.float32)
         raw_arr = np.stack([m.predict(X) for m in self.bundle.arr], axis=1)
@@ -258,7 +260,6 @@ class RetestStore(E.Store):
              "cancel": self.bundle.cancel.predict(X).astype(np.float32),
              "p_prod": self.prod.predict_proba(c[self.names])[:, 1].astype(np.float32),
              "rearr": L.needs_rearrangement(raw_arr)}
-        np.savez(path, sha=self.sha, **d)
         self._pred[ym] = d
         return d
 
@@ -267,6 +268,14 @@ class RetestStore(E.Store):
 
 def clean_tree() -> bool:
     return not _git("status", "--porcelain", "--untracked-files=no").stdout.strip()
+
+
+def verify_expected_hashes(models: dict, expected: dict = None) -> None:
+    expected = EXPECTED_MODEL_SHA256 if expected is None else expected
+    bad = [f"{k}: {models.get(k, {}).get('sha256')} != {v}" for k, v in expected.items()
+           if models.get(k, {}).get("sha256") != v]
+    if bad:
+        raise SystemExit("freeze refused: model files differ from the hashes in Amendment 1:\n  " + "\n  ".join(bad))
 
 
 def stage_freeze(freeze_path: Path = None, data_root: Path = None, store=None) -> dict:
@@ -285,6 +294,7 @@ def stage_freeze(freeze_path: Path = None, data_root: Path = None, store=None) -
         if name != "arrival_ladder" and _git("ls-files", "--error-unmatch", f"models/{f}").returncode:
             raise SystemExit(f"freeze refused: models/{f} is not tracked by git")
     models = hash_models()
+    verify_expected_hashes(models)
     store = store or make_store()
     window = fit_window()
     log(f"fit window {window[0]}..{window[-1]}")
@@ -509,16 +519,17 @@ def arrival_passes(arrival_outcome: str) -> bool:
 
 def confirmation_outcome(dec: dict) -> str:
     """Take-away-only C confirmation (D4), on the C decision block of E.connection_metrics with C4 re-read as a point
-    estimate: C1-C3 failing means no connection numbers, C6 failing means none either; otherwise C4 point estimate
-    below B-L confirms the copula, and a point estimate at or above 0 hands over to the original C4 rule (layover
-    table B-L). C5 only decides whether the trip-level number is shown."""
-    if not (dec["C1"]["pass"] and dec["C2"]["pass"] and dec["C3"]["pass"]):
-        return "no_connection_numbers"
-    if not dec["C6"]["pass"]:
-        return "no_connection_numbers_c6_failed"
-    if dec["C4"]["pass"]:
+    estimate. Same ordering as the original: all of C1-C4 and C6 pass -> copula; C1-C3 pass and C4 fails -> layover
+    table B-L (even if C6 also fails: C6 failing withholds the copula only); C1-C3 failing -> no numbers; otherwise
+    (C4 passes, C6 fails) -> no numbers, C6. C5 only decides whether the trip-level number is shown."""
+    c1, c2, c3, c4, c6 = (dec[k]["pass"] for k in ("C1", "C2", "C3", "C4", "C6"))
+    if c1 and c2 and c3 and c4 and c6:                    # same order as E.connection_metrics
         return E.COPULA_SHIP
-    return "serve_layover_table_B-L_itin-layover-table-v1"
+    if c1 and c2 and c3 and not c4:
+        return "serve_layover_table_B-L_itin-layover-table-v1"
+    if not (c1 and c2 and c3):
+        return "no_connection_numbers"
+    return "no_connection_numbers_c6_failed"
 
 
 def final_connection_outcome(arrival_outcome: str, c_outcome: str = None) -> str:
