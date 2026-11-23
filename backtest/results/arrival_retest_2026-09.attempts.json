@@ -1,0 +1,15 @@
+[
+  {
+    "started_utc": "2026-11-23T03:33:25Z",
+    "output": "arrival_retest_2026-09.json",
+    "code_commit": "1c9aa0ff8d654b9ac1bd6dfe28375ffa47900a4d",
+    "freeze_commit": "84954994bef49f42689bbc9420cc182c20f549b2",
+    "reason": null,
+    "models_sha256": {
+      "arrival_ladder": "eec7f6b98e25f7da9450258fbb9f524b4e3cc91693491869cec9edec7fb8f53c",
+      "production_model": "fa854d7561663b0202f43b05741fe57f92699f2e99baf150e9dcd327097a5bf7",
+      "connection_dependence": "0c513c96b8b73e034c0a663bf8f8c08e6b27c0b83e3f5bf6a66d09a42baad761",
+      "mct_defaults": "ea889882d2f3c54995cf00abb3c58da31be9fdae5ac06ec8f006822873a054dd"
+    }
+  }
+]
